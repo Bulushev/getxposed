@@ -94,6 +94,8 @@ async def cmd_start(message: types.Message, bot: Bot, command: CommandObject):
         raw = payload[4:]
         target = normalize_username(f"@{raw}") if not raw.startswith("@") else normalize_username(raw)
         if target:
+            if message.from_user and message.from_user.id:
+                db.add_ref_visit(target, message.from_user.id)
             await message.answer(
                 f"Оцени пользователя {target}:",
                 reply_markup=build_rating_kb(target),
@@ -212,14 +214,19 @@ async def on_text(message: types.Message):
         link = f"https://t.me/{me.username}?start=ref_{message.from_user.username}"
         rows = db.get_stats(target)
         total = db.get_total(target)
+        ref_count = db.count_ref_visitors(target)
         if total == 0:
             await message.answer(
                 f"Пока нет оценок для {target}.",
                 reply_markup=build_main_kb(),
             )
+            await message.answer(f"👀 тебя уже посмотрели — {ref_count} человек")
             await message.answer(f"Твоя ссылка для оценок:\n{link}")
             return
-        lines = [f"Статистика для {target} (всего {total}):"]
+        lines = [
+            f"Статистика для {target} (всего {total}):",
+            f"👀 тебя уже посмотрели — {ref_count} человек",
+        ]
         counts = {label: 0 for label in RATINGS}
         for label, cnt in rows:
             counts[label] = cnt

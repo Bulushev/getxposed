@@ -39,23 +39,39 @@ def init_db() -> bool:
                         )
                         """
                     )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS users (
-                            user_id BIGINT PRIMARY KEY,
-                            username TEXT NOT NULL UNIQUE,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                        """
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    cur.execute(
-                        """
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
-                        ON votes (target, voter_id)
-                        WHERE voter_id IS NOT NULL
-                        """
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ref_visits (
+                        id SERIAL PRIMARY KEY,
+                        target TEXT NOT NULL,
+                        visitor_id BIGINT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    conn.commit()
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
+                    ON votes (target, voter_id)
+                    WHERE voter_id IS NOT NULL
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
+                    ON ref_visits (target, visitor_id)
+                    """
+                )
+                conn.commit()
             finally:
                 conn.close()
             return True
@@ -87,9 +103,25 @@ def init_db() -> bool:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS ref_visits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target TEXT NOT NULL,
+                    visitor_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
                 ON votes (target, voter_id)
                 WHERE voter_id IS NOT NULL
+                """
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
+                ON ref_visits (target, visitor_id)
                 """
             )
             conn.commit()
@@ -170,6 +202,62 @@ def upsert_user(user_id: int, username: str) -> None:
                 )
         finally:
             conn.close()
+
+
+def add_ref_visit(target: str, visitor_id: int) -> None:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO ref_visits (target, visitor_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (target, visitor_id),
+                    )
+                    conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB add_ref_visit failed: %s", exc)
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ref_visits (target, visitor_id) VALUES (?, ?)",
+                    (target, visitor_id),
+                )
+        finally:
+            conn.close()
+
+
+def count_ref_visitors(target: str) -> int:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM ref_visits WHERE target = %s",
+                        (target,),
+                    )
+                    total = cur.fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB count_ref_visitors failed: %s", exc)
+            return 0
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM ref_visits WHERE target = ?",
+                (target,),
+            )
+            total = cur.fetchone()[0]
+        finally:
+            conn.close()
+    return int(total)
 
 
 def get_user_id_by_username(username: str) -> Optional[int]:
