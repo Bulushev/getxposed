@@ -251,7 +251,10 @@ async def on_text(message: types.Message):
             counts[label] = cnt
         for label in RATINGS:
             lines.append(f"{label}: {counts[label]}")
-        text = "\n".join(lines) + f"`{link}`\nзакинь ссылку в сторис —\nсамые честные ответы приходят именно оттуда 👀"
+        text = (
+            "\n".join(lines)
+            + f"\n`{link}`\nзакинь ссылку в сторис —\nсамые честные ответы приходят именно оттуда 👀"
+        )
         await message.answer(
             text,
             reply_markup=build_main_kb(),
