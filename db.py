@@ -102,3 +102,55 @@ def get_total(target: str) -> int:
     total = cur.fetchone()[0]
     conn.close()
     return int(total)
+
+
+def count_users() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT COUNT(*) FROM users")
+    total = cur.fetchone()[0]
+    conn.close()
+    return int(total)
+
+
+def count_votes() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT COUNT(*) FROM votes")
+    total = cur.fetchone()[0]
+    conn.close()
+    return int(total)
+
+
+def top_voters(limit: int = 10) -> List[Tuple[Optional[str], int]]:
+    conn = get_conn()
+    cur = conn.execute(
+        """
+        SELECT u.username, COUNT(v.id) as cnt
+        FROM votes v
+        LEFT JOIN users u ON u.user_id = v.voter_id
+        WHERE v.voter_id IS NOT NULL
+        GROUP BY v.voter_id
+        ORDER BY cnt DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [(row[0], int(row[1])) for row in rows]
+
+
+def top_targets(limit: int = 10) -> List[Tuple[str, int]]:
+    conn = get_conn()
+    cur = conn.execute(
+        """
+        SELECT target, COUNT(id) as cnt
+        FROM votes
+        GROUP BY target
+        ORDER BY cnt DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [(row[0], int(row[1])) for row in rows]

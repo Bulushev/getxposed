@@ -19,6 +19,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN is not set. Put it in .env or environment.")
 PORT = int(os.getenv("PORT", "8080"))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "bulushew").lstrip("@").lower()
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -157,6 +158,43 @@ async def cmd_stats(message: types.Message):
         counts[label] = cnt
     for label in RATINGS:
         lines.append(f"{label}: {counts[label]}")
+    await message.answer("\n".join(lines), reply_markup=build_main_kb())
+
+
+@router.message(Command("admin_stats"))
+async def cmd_admin_stats(message: types.Message):
+    register_user(message)
+    username = (message.from_user.username or "").lower() if message.from_user else ""
+    if username != ADMIN_USERNAME:
+        return
+
+    users_total = db.count_users()
+    votes_total = db.count_votes()
+    top_voters = db.top_voters(10)
+    top_targets = db.top_targets(10)
+
+    lines = [
+        "Админ статистика:",
+        f"Пользователей (/start): {users_total}",
+        f"Всего оценок: {votes_total}",
+        "",
+        "Топ 10 кто больше всех оставил оценок:",
+    ]
+    if top_voters:
+        for i, (uname, cnt) in enumerate(top_voters, start=1):
+            label = uname if uname else "(без username)"
+            lines.append(f"{i}. {label}: {cnt}")
+    else:
+        lines.append("пока пусто")
+
+    lines.append("")
+    lines.append("Топ 10 о ком больше всего оставили оценок:")
+    if top_targets:
+        for i, (target, cnt) in enumerate(top_targets, start=1):
+            lines.append(f"{i}. {target}: {cnt}")
+    else:
+        lines.append("пока пусто")
+
     await message.answer("\n".join(lines), reply_markup=build_main_kb())
 
 
