@@ -80,6 +80,12 @@ def build_main_kb() -> types.ReplyKeyboardMarkup:
     return kb.as_markup(resize_keyboard=True)
 
 
+def build_profile_link_kb(link: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Скопировать ссылку", url=link)
+    return kb.as_markup()
+
+
 def register_user(message: types.Message) -> None:
     if message.from_user and message.from_user.id and message.from_user.username:
         db.upsert_user(message.from_user.id, f"@{message.from_user.username}")
@@ -208,10 +214,19 @@ async def on_text(message: types.Message):
             await message.answer("Нужен @username в профиле Telegram", reply_markup=build_main_kb())
             return
         target = f"@{message.from_user.username}"
+        me = await message.bot.get_me()
+        link = f"https://t.me/{me.username}?start=ref_{message.from_user.username}"
         rows = db.get_stats(target)
         total = db.get_total(target)
         if total == 0:
-            await message.answer(f"Пока нет оценок для {target}.", reply_markup=build_main_kb())
+            await message.answer(
+                f"Пока нет оценок для {target}.",
+                reply_markup=build_main_kb(),
+            )
+            await message.answer(
+                "Твоя ссылка для оценок:",
+                reply_markup=build_profile_link_kb(link),
+            )
             return
         lines = [f"Статистика для {target} (всего {total}):"]
         counts = {label: 0 for label in RATINGS}
@@ -220,6 +235,10 @@ async def on_text(message: types.Message):
         for label in RATINGS:
             lines.append(f"{label}: {counts[label]}")
         await message.answer("\n".join(lines), reply_markup=build_main_kb())
+        await message.answer(
+            "Твоя ссылка для оценок:",
+            reply_markup=build_profile_link_kb(link),
+        )
         return
     if lowered == "дать коммент":
         if message.from_user:
