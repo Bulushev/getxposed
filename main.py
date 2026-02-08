@@ -80,11 +80,6 @@ def build_main_kb() -> types.ReplyKeyboardMarkup:
     return kb.as_markup(resize_keyboard=True)
 
 
-def build_profile_link_kb(link: str) -> types.InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Скопировать ссылку", url=link)
-    return kb.as_markup()
-
 
 def register_user(message: types.Message) -> None:
     if message.from_user and message.from_user.id and message.from_user.username:
@@ -103,7 +98,6 @@ async def cmd_start(message: types.Message, bot: Bot, command: CommandObject):
                 f"Оцени пользователя {target}:",
                 reply_markup=build_rating_kb(target),
             )
-            await message.answer("меню", reply_markup=build_main_kb())
             return
     total = 0
     if message.from_user and message.from_user.username:
@@ -223,10 +217,7 @@ async def on_text(message: types.Message):
                 f"Пока нет оценок для {target}.",
                 reply_markup=build_main_kb(),
             )
-            await message.answer(
-                "Твоя ссылка для оценок:",
-                reply_markup=build_profile_link_kb(link),
-            )
+            await message.answer(f"Твоя ссылка для оценок:\n{link}")
             return
         lines = [f"Статистика для {target} (всего {total}):"]
         counts = {label: 0 for label in RATINGS}
@@ -235,10 +226,7 @@ async def on_text(message: types.Message):
         for label in RATINGS:
             lines.append(f"{label}: {counts[label]}")
         await message.answer("\n".join(lines), reply_markup=build_main_kb())
-        await message.answer(
-            "Твоя ссылка для оценок:",
-            reply_markup=build_profile_link_kb(link),
-        )
+        await message.answer(f"Твоя ссылка для оценок:\n{link}")
         return
     if lowered == "дать коммент":
         if message.from_user:
@@ -255,7 +243,6 @@ async def on_text(message: types.Message):
             f"Оцени пользователя {target}:",
             reply_markup=build_rating_kb(target),
         )
-        await message.answer("меню", reply_markup=build_main_kb())
         return
     target = normalize_username(text)
     if not target:
@@ -264,7 +251,6 @@ async def on_text(message: types.Message):
         f"Оцени пользователя {target}:",
         reply_markup=build_rating_kb(target),
     )
-    await message.answer("меню", reply_markup=build_main_kb())
 
 
 @router.callback_query(F.data.startswith("rate|"))
