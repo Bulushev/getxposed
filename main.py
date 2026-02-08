@@ -216,12 +216,17 @@ async def on_text(message: types.Message):
         total = db.get_total(target)
         ref_count = db.count_ref_visitors(target)
         if total == 0:
-            await message.answer(
-                f"Пока нет оценок для {target}.",
-                reply_markup=build_main_kb(),
+            text = (
+                f"Пока нет оценок для {target}.\n"
+                f"👀 тебя уже посмотрели — {ref_count} человек\n\n"
+                f"Твоя ссылка для оценок:\n`{link}`"
             )
-            await message.answer(f"👀 тебя уже посмотрели — {ref_count} человек")
-            await message.answer(f"Твоя ссылка для оценок:\n{link}")
+            await message.answer(
+                text,
+                reply_markup=build_main_kb(),
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+            )
             return
         lines = [
             f"Статистика для {target} (всего {total}):",
@@ -232,8 +237,13 @@ async def on_text(message: types.Message):
             counts[label] = cnt
         for label in RATINGS:
             lines.append(f"{label}: {counts[label]}")
-        await message.answer("\n".join(lines), reply_markup=build_main_kb())
-        await message.answer(f"Твоя ссылка для оценок:\n{link}")
+        text = "\n".join(lines) + f"\n\nТвоя ссылка для оценок:\n`{link}`"
+        await message.answer(
+            text,
+            reply_markup=build_main_kb(),
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
         return
     if lowered == "дать коммент":
         if message.from_user:
