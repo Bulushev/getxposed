@@ -297,6 +297,7 @@ async def main():
         None,
         lambda: health_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
     )
+    db.init_db()
     bot = Bot(BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
