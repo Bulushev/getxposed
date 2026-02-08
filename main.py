@@ -20,7 +20,7 @@ if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN is not set. Put it in .env or environment.")
 PORT = int(os.getenv("PORT", "8080"))
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 
 router = Router()
 health_app = Flask(__name__)
@@ -237,15 +237,19 @@ async def on_rate(callback: types.CallbackQuery):
 
     target_id = db.get_user_id_by_username(target)
     if target_id:
-        try:
-            extra = NOTIFY_TEXTS.get(label, "")
-            text = f"Тебя оценили: {label}"
-            if extra:
-                text = f"{text}\n\n{extra}"
-            await callback.bot.send_message(target_id, text)
-        except Exception:
-            # User might have blocked the bot or not started it.
-            pass
+        extra = NOTIFY_TEXTS.get(label, "")
+        text = f"Тебя оценили: {label}"
+        if extra:
+            text = f"{text}\n\n{extra}"
+
+        async def _send_notify() -> None:
+            try:
+                await asyncio.wait_for(callback.bot.send_message(target_id, text), timeout=3.0)
+            except Exception:
+                # User might have blocked the bot, or network is slow.
+                pass
+
+        asyncio.create_task(_send_notify())
 
 
 async def main():
