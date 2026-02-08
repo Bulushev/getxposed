@@ -264,6 +264,9 @@ async def on_rate(callback: types.CallbackQuery):
 
     voter_id = callback.from_user.id if callback.from_user else None
     ok = db.add_vote(target, label, voter_id)
+    if ok is None:
+        await callback.answer("База недоступна, попробуй позже", show_alert=True)
+        return
     if not ok:
         await callback.answer("Вы уже оценивали этого пользователя", show_alert=True)
         return
