@@ -468,3 +468,32 @@ def top_targets(limit: int = 10) -> List[Tuple[str, int]]:
         finally:
             conn.close()
     return [(row[0], int(row[1])) for row in rows]
+
+
+def list_users(limit: int = 100) -> List[str]:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT username FROM users ORDER BY updated_at DESC LIMIT %s",
+                        (limit,),
+                    )
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB list_users failed: %s", exc)
+            return []
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                "SELECT username FROM users ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    return [row[0] for row in rows]

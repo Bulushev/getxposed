@@ -200,10 +200,30 @@ async def cmd_admin_stats(message: types.Message):
     await message.answer("\n".join(lines), reply_markup=build_main_kb())
 
 
+@router.message(Command("users"))
+async def cmd_users(message: types.Message):
+    register_user(message)
+    username = (message.from_user.username or "").lower() if message.from_user else ""
+    if username != ADMIN_USERNAME:
+        return
+
+    users = db.list_users(100)
+    if not users:
+        await message.answer("Список пуст.", reply_markup=build_main_kb())
+        return
+
+    text = "Пользователи (последние 100):\n" + "\n".join(users)
+    await message.answer(text, reply_markup=build_main_kb())
+
+
 @router.message(F.text)
 async def on_text(message: types.Message):
     register_user(message)
     text = (message.text or "").strip()
+    if text.startswith("/"):
+        if message.from_user:
+            WAITING_FOR_USERNAME.discard(message.from_user.id)
+        return
     lowered = text.lower()
     if lowered == "мой профиль":
         if not message.from_user or not message.from_user.username:
