@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+from urllib.parse import quote_plus
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router, types
@@ -78,6 +79,14 @@ def build_main_kb() -> types.ReplyKeyboardMarkup:
     kb.button(text="дать коммент")
     kb.adjust(2)
     return kb.as_markup(resize_keyboard=True)
+
+
+def build_share_kb(link: str) -> types.InlineKeyboardMarkup:
+    share_text = "закинь ссылку в сторис - самые честные ответы приходят именно оттуда"
+    share_url = f"https://t.me/share/url?url={quote_plus(link)}&text={quote_plus(share_text)}"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Поделиться", url=share_url)
+    return kb.as_markup()
 
 
 
@@ -283,6 +292,7 @@ async def on_text(message: types.Message):
             parse_mode="Markdown",
             disable_web_page_preview=True,
         )
+        await message.answer("Поделиться ссылкой:", reply_markup=build_share_kb(link))
         return
     if lowered == "дать коммент":
         if message.from_user:
