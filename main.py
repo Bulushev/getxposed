@@ -82,7 +82,7 @@ def build_main_kb() -> types.ReplyKeyboardMarkup:
 
 
 def build_share_kb(link: str) -> types.InlineKeyboardMarkup:
-    share_text = "оцени меня анонимно"
+    share_text = "нука интересно как меня оценишь"
     share_url = f"https://t.me/share/url?url={quote_plus(link)}&text={quote_plus(share_text)}"
     kb = InlineKeyboardBuilder()
     kb.button(text="Поделиться", url=share_url)
