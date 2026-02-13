@@ -113,8 +113,13 @@ async def cmd_start(message: types.Message, bot: Bot, command: CommandObject):
     total = 0
     if message.from_user and message.from_user.username:
         total = db.get_total(f"@{message.from_user.username}")
+    start_text = (
+        "похоже, кто-то уже заходил и присматривался к тебе"
+        if total == 0
+        else f"тебя уже оценили {total} человека, открой свой профиль"
+    )
     await message.answer(
-        f"тебя уже оценили {total} человека, открой свой профиль",
+        start_text,
         reply_markup=build_main_kb(),
     )
 
@@ -260,30 +265,40 @@ async def on_text(message: types.Message):
             f"`{link}`",
             "",
             f"👀 посмотрели — {viewed}",
-            f"🔥 оставили метки — {total}",
+            "🔥 оставили метки — похоже, кто-то уже заходил"
+            if total == 0
+            else f"🔥 оставили метки — {total}",
             f"👁 молча заглянули — {silent}",
             "",
             "— — —",
             "",
-            "чаще всего тебя видят как:",
-            f"{top_label}" if top_label else "пока без меток",
-            "",
-            "метки:",
         ]
-        for label in RATINGS:
-            if counts[label] > 0:
-                lines.append(f"{label} — {counts[label]}")
+        if total < 3:
+            lines += [
+                "👀 тебе уже что-то написали…",
+                "покажем, когда станет чуть больше.",
+            ]
+        else:
+            lines += [
+                "чаще всего тебя видят как:",
+                f"{top_label}" if top_label else "пока без меток",
+                "",
+                "метки:",
+            ]
+            for label in RATINGS:
+                if counts[label] > 0:
+                    lines.append(f"{label} — {counts[label]}")
 
-        lines += [
-            "",
-            "— — —",
-            "",
-            "👀 тебя видят очень по-разному.",
-            "один из ответов явно выбивается…",
-            "",
-            "⚡ похоже, вокруг тебя начинается движ.",
-            "интересно, что будет на 20 просмотрах.",
-        ]
+            lines += [
+                "",
+                "— — —",
+                "",
+                "👀 тебя видят очень по-разному.",
+                "один из ответов явно выбивается…",
+                "",
+                "⚡ похоже, вокруг тебя начинается движ.",
+                "интересно, что будет на 20 просмотрах.",
+            ]
 
         text = "\n".join(lines)
         await message.answer(
@@ -333,21 +348,57 @@ async def on_rate(callback: types.CallbackQuery):
         await callback.answer("Некорректная оценка", show_alert=True)
         return
 
+    before_total = db.get_total(target)
+    before_rows = db.get_stats(target)
+    before_counts = {k: int(v) for k, v in before_rows}
+    max_before = max(before_counts.values()) if before_counts else 0
+    before_label_count = before_counts.get(label, 0)
+
     voter_id = callback.from_user.id if callback.from_user else None
     ok = db.add_vote(target, label, voter_id)
     if ok is None:
         await callback.answer("База недоступна, попробуй позже", show_alert=True)
         return
     if not ok:
+        target_id = db.get_user_id_by_username(target)
+        if target_id and voter_id is not None and db.mark_seen_hint_sent(target, voter_id):
+            async def _send_seen_hint() -> None:
+                try:
+                    await asyncio.wait_for(
+                        callback.bot.send_message(target_id, "👁 тебя явно рассматривают"),
+                        timeout=3.0,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_seen_hint())
         await callback.answer("Вы уже оценивали этого пользователя", show_alert=True)
         return
     await callback.answer("Готово")
     await callback.message.answer(
-        f"Оценка сохранена для {target}.",
+        "✅ метка отправлена.\n\nтеперь твой ход 👀\nхочешь узнать, что думают о тебе?",
         reply_markup=build_main_kb(),
     )
 
     target_id = db.get_user_id_by_username(target)
+    current_user = callback.from_user
+    if current_user and current_user.username and target_id:
+        reverse_label = db.get_vote_label(f"@{current_user.username}", target_id)
+        if reverse_label and reverse_label != label:
+            async def _send_reverse_diff_hint() -> None:
+                try:
+                    await asyncio.wait_for(
+                        callback.bot.send_message(
+                            current_user.id,
+                            "⚡ кто-то увидел тебя совсем иначе",
+                        ),
+                        timeout=3.0,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_reverse_diff_hint())
+
     if target_id:
         extra = NOTIFY_TEXTS.get(label, "")
         text = f"Тебя оценили: {label}"
@@ -362,6 +413,62 @@ async def on_rate(callback: types.CallbackQuery):
                 pass
 
         asyncio.create_task(_send_notify())
+
+        rows_after = db.get_stats(target)
+        counts_after = {k: int(v) for k, v in rows_after}
+        after_label_count = counts_after.get(label, 0)
+        if len(counts_after) >= 2 and after_label_count > max_before and before_label_count <= max_before:
+            async def _send_shift_hint() -> None:
+                try:
+                    await asyncio.wait_for(
+                        callback.bot.send_message(
+                            target_id,
+                            "👀 похоже, мнение о тебе начинает меняться",
+                        ),
+                        timeout=3.0,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_shift_hint())
+
+        # Outlier hint: 5+ votes and this label is a rare outlier vs dominant pattern.
+        total = db.get_total(target)
+        if before_total <= 5 < total:
+            async def _send_hype_hint() -> None:
+                try:
+                    await asyncio.wait_for(
+                        callback.bot.send_message(
+                            target_id,
+                            "🔥 вокруг тебя начинается движ",
+                        ),
+                        timeout=3.0,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_hype_hint())
+
+        if total >= 5:
+            rows = db.get_stats(target)
+            counts = {k: int(v) for k, v in rows}
+            current = counts.get(label, 0)
+            others = [v for k, v in counts.items() if k != label]
+            max_other = max(others) if others else 0
+            if current == 1 and max_other >= 3:
+                async def _send_outlier_hint() -> None:
+                    try:
+                        await asyncio.wait_for(
+                            callback.bot.send_message(
+                                target_id,
+                                "⚠️ один из ответов сильно отличается от остальных…",
+                            ),
+                            timeout=3.0,
+                        )
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_send_outlier_hint())
 
 
 async def main():

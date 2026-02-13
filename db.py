@@ -60,6 +60,16 @@ def init_db() -> bool:
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS seen_hints (
+                        target TEXT NOT NULL,
+                        watcher_id BIGINT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (target, watcher_id)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
                     ON votes (target, voter_id)
                     WHERE voter_id IS NOT NULL
@@ -108,6 +118,16 @@ def init_db() -> bool:
                     target TEXT NOT NULL,
                     visitor_id INTEGER NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS seen_hints (
+                    target TEXT NOT NULL,
+                    watcher_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (target, watcher_id)
                 )
                 """
             )
@@ -260,6 +280,44 @@ def count_ref_visitors(target: str) -> int:
     return int(total)
 
 
+def mark_seen_hint_sent(target: str, watcher_id: int) -> bool:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO seen_hints (target, watcher_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (target, watcher_id),
+                    )
+                    inserted = cur.rowcount > 0
+                    conn.commit()
+                return inserted
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB mark_seen_hint_sent failed: %s", exc)
+            return False
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            with conn:
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO seen_hints (target, watcher_id)
+                    VALUES (?, ?)
+                    """,
+                    (target, watcher_id),
+                )
+                return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
 def get_user_id_by_username(username: str) -> Optional[int]:
     if USE_POSTGRES:
         try:
@@ -284,6 +342,50 @@ def get_user_id_by_username(username: str) -> Optional[int]:
     if not row:
         return None
     return int(row[0])
+
+
+def get_vote_label(target: str, voter_id: int) -> Optional[str]:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT label
+                        FROM votes
+                        WHERE target = %s AND voter_id = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (target, voter_id),
+                    )
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB get_vote_label failed: %s", exc)
+            return None
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                """
+                SELECT label
+                FROM votes
+                WHERE target = ? AND voter_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (target, voter_id),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+
+    if not row:
+        return None
+    return str(row[0])
 
 
 def get_stats(target: str) -> List[Tuple[str, int]]:
