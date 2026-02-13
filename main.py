@@ -389,7 +389,7 @@ async def on_rate(callback: types.CallbackQuery):
                 try:
                     await asyncio.wait_for(
                         callback.bot.send_message(
-                            current_user.id,
+                            target_id,
                             "⚡ кто-то увидел тебя совсем иначе",
                         ),
                         timeout=3.0,
