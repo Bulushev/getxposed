@@ -157,8 +157,13 @@
     const name = (user && (user.first_name || user.username || user.last_name)) || "User";
     profileName.textContent = user && user.username ? "@" + user.username : name;
     avatarFallback.textContent = (name || "U").slice(0, 1).toUpperCase();
-    if (user && user.photo_url) {
-      avatarImg.src = user.photo_url;
+    const username = user && user.username ? String(user.username).replace(/^@/, "") : "";
+    const directPhoto = user && user.photo_url ? String(user.photo_url) : "";
+    const fallbackPhoto = username ? "https://t.me/i/userpic/320/" + username + ".jpg" : "";
+    const photo = directPhoto || fallbackPhoto;
+
+    if (photo) {
+      avatarImg.src = photo;
       avatarImg.style.display = "block";
       avatarFallback.style.display = "none";
       avatarImg.onerror = function () {
