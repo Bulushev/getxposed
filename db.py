@@ -47,48 +47,48 @@ def init_db() -> bool:
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS speed TEXT DEFAULT 'slow'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS contact_format TEXT DEFAULT 'text'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS caution TEXT DEFAULT 'false'")
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        user_id BIGINT PRIMARY KEY,
-                        username TEXT NOT NULL UNIQUE,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS users (
+                            user_id BIGINT PRIMARY KEY,
+                            username TEXT NOT NULL UNIQUE,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
                     )
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS ref_visits (
-                        id SERIAL PRIMARY KEY,
-                        target TEXT NOT NULL,
-                        visitor_id BIGINT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS ref_visits (
+                            id SERIAL PRIMARY KEY,
+                            target TEXT NOT NULL,
+                            visitor_id BIGINT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
                     )
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS seen_hints (
-                        target TEXT NOT NULL,
-                        watcher_id BIGINT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (target, watcher_id)
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS seen_hints (
+                            target TEXT NOT NULL,
+                            watcher_id BIGINT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            PRIMARY KEY (target, watcher_id)
+                        )
+                        """
                     )
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
-                    ON votes (target, voter_id)
-                    WHERE voter_id IS NOT NULL
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
-                    ON ref_visits (target, visitor_id)
-                    """
-                )
+                    cur.execute(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique
+                        ON votes (target, voter_id)
+                        WHERE voter_id IS NOT NULL
+                        """
+                    )
+                    cur.execute(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
+                        ON ref_visits (target, visitor_id)
+                        """
+                    )
                 conn.commit()
             finally:
                 conn.close()
