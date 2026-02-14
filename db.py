@@ -19,7 +19,7 @@ def _get_sqlite_conn() -> sqlite3.Connection:
 
 
 def _get_pg_conn():
-    return psycopg.connect(DATABASE_URL, connect_timeout=5)
+    return psycopg.connect(DATABASE_URL, connect_timeout=2)
 
 
 def init_db() -> bool:
@@ -341,11 +341,16 @@ def add_vote(
 
 
 def upsert_user(user_id: int, username: str) -> None:
+    username = username.lower()
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM users WHERE LOWER(username) = LOWER(%s) AND user_id <> %s",
+                        (username, user_id),
+                    )
                     cur.execute(
                         """
                         INSERT INTO users (user_id, username, updated_at)
@@ -366,6 +371,10 @@ def upsert_user(user_id: int, username: str) -> None:
         try:
             with conn:
                 conn.execute(
+                    "DELETE FROM users WHERE LOWER(username) = LOWER(?) AND user_id <> ?",
+                    (username, user_id),
+                )
+                conn.execute(
                     """
                     INSERT INTO users (user_id, username, updated_at)
                     VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -377,6 +386,99 @@ def upsert_user(user_id: int, username: str) -> None:
                 )
         finally:
             conn.close()
+
+
+def normalize_case_data() -> tuple[int, int]:
+    """
+    Lowercase usernames/targets and collapse users duplicates by case.
+    Returns: (users_merged, rows_lowercased)
+    """
+    users_merged = 0
+    rows_lowercased = 0
+
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        WITH ranked AS (
+                            SELECT user_id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY LOWER(username)
+                                       ORDER BY updated_at DESC, user_id DESC
+                                   ) AS rn
+                            FROM users
+                        )
+                        DELETE FROM users u
+                        USING ranked r
+                        WHERE u.user_id = r.user_id AND r.rn > 1
+                        """
+                    )
+                    users_merged += max(cur.rowcount, 0)
+
+                    cur.execute("UPDATE users SET username = LOWER(username) WHERE username <> LOWER(username)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                    cur.execute("UPDATE votes SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                    cur.execute("UPDATE ref_visits SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                    cur.execute("UPDATE seen_hints SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB normalize_case_data failed: %s", exc)
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            with conn:
+                try:
+                    cur = conn.execute(
+                        "SELECT user_id, username FROM users ORDER BY updated_at DESC, user_id DESC"
+                    )
+                    keep_by_lower: dict[str, int] = {}
+                    drop_ids: list[int] = []
+                    for row in cur.fetchall():
+                        uid = int(row[0])
+                        uname = str(row[1])
+                        key = uname.lower()
+                        if key in keep_by_lower:
+                            drop_ids.append(uid)
+                        else:
+                            keep_by_lower[key] = uid
+                    for uid in drop_ids:
+                        conn.execute("DELETE FROM users WHERE user_id = ?", (uid,))
+                    users_merged += len(drop_ids)
+                except sqlite3.OperationalError:
+                    pass
+
+                try:
+                    cur = conn.execute("UPDATE users SET username = LOWER(username) WHERE username <> LOWER(username)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    cur = conn.execute("UPDATE votes SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    cur = conn.execute("UPDATE ref_visits SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    cur = conn.execute("UPDATE seen_hints SET target = LOWER(target) WHERE target <> LOWER(target)")
+                    rows_lowercased += max(cur.rowcount, 0)
+                except sqlite3.OperationalError:
+                    pass
+        finally:
+            conn.close()
+
+    return users_merged, rows_lowercased
 
 
 def add_ref_visit(target: str, visitor_id: int) -> None:
@@ -479,7 +581,7 @@ def get_user_id_by_username(username: str) -> Optional[int]:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT user_id FROM users WHERE username = %s", (username,))
+                    cur.execute("SELECT user_id FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
                     row = cur.fetchone()
             finally:
                 conn.close()
@@ -489,7 +591,7 @@ def get_user_id_by_username(username: str) -> Optional[int]:
     else:
         conn = _get_sqlite_conn()
         try:
-            cur = conn.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+            cur = conn.execute("SELECT user_id FROM users WHERE LOWER(username) = LOWER(?)", (username,))
             row = cur.fetchone()
         finally:
             conn.close()

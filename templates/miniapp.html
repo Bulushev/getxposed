@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>GetXposed Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #111319;
+      --card: #1b1f29;
+      --text: #f2f4f8;
+      --muted: #aab1c2;
+      --accent: #ff6e3d;
+      --line: #2a3040;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(130% 80% at 0% 0%, #1e2432 0%, #111319 45%) fixed;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 16px 14px 40px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .title { margin: 0 0 8px; font-size: 18px; }
+    .muted { color: var(--muted); }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px;
+      color: #fff;
+      background: #2d3447;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    .btn.accent { background: var(--accent); color: #111; font-weight: 600; }
+    .btn:disabled { opacity: .6; cursor: default; }
+    input, select {
+      width: 100%;
+      background: #121723;
+      color: #fff;
+      border: 1px solid #2d3447;
+      border-radius: 10px;
+      padding: 10px 11px;
+      margin-top: 8px;
+      margin-bottom: 8px;
+      font-size: 15px;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      line-height: 1.4;
+      color: #f8f9ff;
+    }
+    .status { margin-top: 8px; color: var(--muted); min-height: 20px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1 class="title">GetXposed Mini App</h1>
+    <div class="row">
+      <button id="tabProfile" class="btn accent">👀 Профиль</button>
+      <button id="tabAnswer" class="btn">✍️ Ответ</button>
+      <button id="tabInsight" class="btn">🧭 Узнать</button>
+    </div>
+    <div class="status" id="authStatus">Проверка Telegram сессии...</div>
+  </div>
+
+  <section id="profileBlock" class="card">
+    <pre id="profileText">Загрузка...</pre>
+  </section>
+
+  <section id="answerBlock" class="card" style="display:none;">
+    <div class="muted">Оставь ответ о человеке</div>
+    <input id="target" placeholder="@username">
+    <select id="tone">
+      <option value="easy">😄 Легко, с юмора</option>
+      <option value="serious">🧠 Спокойно, по делу</option>
+    </select>
+    <select id="speed">
+      <option value="fast">🔥 Можно сразу</option>
+      <option value="slow">🐢 Лучше постепенно</option>
+    </select>
+    <select id="contactFormat">
+      <option value="text">💬 Переписка</option>
+      <option value="live">🎤 Живое общение</option>
+    </select>
+    <select id="caution">
+      <option value="false">👍 Нет</option>
+      <option value="true">🚩 Да</option>
+    </select>
+    <button id="sendAnswer" class="btn accent">Отправить</button>
+    <div class="status" id="answerStatus"></div>
+  </section>
+
+  <section id="insightBlock" class="card" style="display:none;">
+    <div class="muted">Узнать, как лучше начать контакт</div>
+    <input id="insightTarget" placeholder="@username">
+    <button id="getInsight" class="btn accent">Показать</button>
+    <pre id="insightText" style="margin-top:10px;"></pre>
+  </section>
+</div>
+
+<script src="/static/miniapp.js"></script>
+</body>
+</html>
