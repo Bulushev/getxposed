@@ -155,12 +155,23 @@
 
   function setAvatar(user) {
     const name = (user && (user.first_name || user.username || user.last_name)) || "User";
-    profileName.textContent = user && user.username ? "@" + user.username : name;
+    const firstName = user && user.first_name ? String(user.first_name).trim() : "";
+    const lastName = user && user.last_name ? String(user.last_name).trim() : "";
+    const usernameRaw = user && user.username ? String(user.username).replace(/^@/, "") : "";
+    const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+    if (fullName) {
+      profileName.textContent = fullName;
+    } else if (usernameRaw) {
+      profileName.textContent = "Пользователь @" + usernameRaw;
+    } else {
+      profileName.textContent = name;
+    }
     avatarFallback.textContent = (name || "U").slice(0, 1).toUpperCase();
-    const username = user && user.username ? String(user.username).replace(/^@/, "") : "";
+    const username = usernameRaw;
+    const proxyPhoto = user && user.avatar_url ? String(user.avatar_url) : "";
     const directPhoto = user && user.photo_url ? String(user.photo_url) : "";
     const fallbackPhoto = username ? "https://t.me/i/userpic/320/" + username + ".jpg" : "";
-    const photo = directPhoto || fallbackPhoto;
+    const photo = proxyPhoto || directPhoto || fallbackPhoto;
 
     if (photo) {
       avatarImg.src = photo;
@@ -192,9 +203,9 @@
       chipSpeed.textContent = rec.speedEmoji;
       chipFormat.textContent = rec.formatEmoji;
     } else {
-      chipTone.textContent = "🙂";
-      chipSpeed.textContent = "🐢";
-      chipFormat.textContent = "💬";
+      chipTone.textContent = "❓";
+      chipSpeed.textContent = "❓";
+      chipFormat.textContent = "❓";
     }
   }
 
@@ -204,7 +215,7 @@
       const resp = await api(endpoint);
       renderProfile(resp.data);
       showingForeignProfile = false;
-      authStatus.textContent = previewMode ? "Preview mode" : "Сессия активна";
+      authStatus.textContent = "";
     } catch (e) {
       summaryBubble.textContent = "Ошибка: " + e.message;
       authStatus.textContent = "Ошибка авторизации";
@@ -419,6 +430,10 @@
     answerStatus.textContent = "Отправка...";
     if (!answerFlowTarget) {
       answerStatus.textContent = "Сначала укажи @username.";
+      return;
+    }
+    if (answerFlowTarget.replace(/^@/, "").toLowerCase().endsWith("bot")) {
+      answerStatus.textContent = "Нельзя оставлять отзывы о ботах.";
       return;
     }
     if (!selected.tone || !selected.speed || !selected.contact_format || !selected.caution) {

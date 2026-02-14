@@ -15,7 +15,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 import db
 
@@ -109,6 +109,7 @@ def api_miniapp_me():
         "last_name": str(user.get("last_name") or ""),
         "photo_url": str(user.get("photo_url") or ""),
     }
+    payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
     return jsonify({"ok": True, "data": payload})
 
 
@@ -133,6 +134,7 @@ def api_miniapp_preview():
                     "first_name": "Preview",
                     "last_name": "User",
                     "photo_url": "",
+                    "avatar_url": "",
                 },
             },
         }
@@ -150,16 +152,59 @@ def api_miniapp_profile():
     if not target:
         return jsonify({"ok": False, "error": "Нужен корректный @username"}), 400
 
+    user_payload = db.get_user_public_by_username(target)
+    # If profile data isn't in DB yet, try resolving basic public user info from Telegram.
+    if (not user_payload or (not user_payload.get("first_name") and not user_payload.get("last_name"))) and APP_LOOP and APP_BOT:
+        try:
+            resolved = asyncio.run_coroutine_threadsafe(
+                fetch_public_user_from_telegram(APP_BOT, target),
+                APP_LOOP,
+            ).result(timeout=5)
+        except Exception:
+            resolved = None
+        if resolved:
+            db.upsert_user(
+                int(resolved["id"]),
+                f"@{resolved['username']}",
+                str(resolved.get("first_name") or ""),
+                str(resolved.get("last_name") or ""),
+                str(resolved.get("photo_url") or ""),
+            )
+            user_payload = db.get_user_public_by_username(target)
+
     payload = build_profile_payload(target)
     payload["link"] = f"https://t.me/{get_bot_public_username()}?start=ref_{target.lstrip('@')}"
-    payload["user"] = db.get_user_public_by_username(target) or {
+    payload["user"] = user_payload or {
         "id": 0,
         "username": target.lstrip("@"),
         "first_name": "",
         "last_name": "",
         "photo_url": "",
     }
+    payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
     return jsonify({"ok": True, "data": payload})
+
+
+@health_app.get("/api/miniapp/avatar")
+def api_miniapp_avatar():
+    username = str(request.args.get("username") or "").strip().lstrip("@").lower()
+    if not username:
+        return Response(status=400)
+    if APP_LOOP is None or APP_BOT is None:
+        return Response(status=503)
+    try:
+        result = asyncio.run_coroutine_threadsafe(
+            fetch_avatar_from_telegram(APP_BOT, username),
+            APP_LOOP,
+        ).result(timeout=8)
+    except Exception:
+        return Response(status=504)
+    if not result:
+        return Response(status=404)
+    content, content_type = result
+    resp = Response(content, status=200, mimetype=content_type)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 @health_app.get("/api/miniapp/insight")
@@ -257,6 +302,15 @@ def api_miniapp_feedback():
     target = normalize_username(str(data.get("target") or ""))
     if not target:
         return jsonify({"ok": False, "error": "Нужен корректный @username"}), 400
+    try:
+        allowed, reason = asyncio.run_coroutine_threadsafe(
+            validate_feedback_target(APP_BOT, target),
+            APP_LOOP,
+        ).result(timeout=5)
+    except Exception:
+        return jsonify({"ok": False, "error": "Не удалось проверить username, попробуй позже."}), 503
+    if not allowed:
+        return jsonify({"ok": False, "error": reason}), 400
 
     tone = normalize_feedback_value(str(data.get("tone") or ""), {"easy", "serious"}, "serious")
     speed = normalize_feedback_value(str(data.get("speed") or ""), {"fast", "slow"}, "slow")
@@ -375,6 +429,11 @@ def get_webapp_user() -> Optional[dict]:
     return verify_telegram_init_data(init_data)
 
 
+def build_avatar_proxy_url(username: str) -> str:
+    uname = username.lstrip("@").lower()
+    return f"/api/miniapp/avatar?username={uname}"
+
+
 def normalize_feedback_value(value: str, allowed: set[str], default: str) -> str:
     return value if value in allowed else default
 
@@ -430,6 +489,50 @@ def queue_coroutine(coro) -> None:
         asyncio.run_coroutine_threadsafe(coro, APP_LOOP)
     except Exception:
         pass
+
+
+async def fetch_public_user_from_telegram(bot: Bot, target: str) -> Optional[dict]:
+    try:
+        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
+    except Exception:
+        return None
+    if chat.type != "private":
+        return None
+    username = (chat.username or target.lstrip("@")).lower()
+    return {
+        "id": int(chat.id),
+        "username": username,
+        "first_name": str(chat.first_name or ""),
+        "last_name": str(chat.last_name or ""),
+        "photo_url": "",
+    }
+
+
+async def fetch_avatar_from_telegram(bot: Bot, username: str) -> Optional[tuple[bytes, str]]:
+    target = f"@{username.lstrip('@').lower()}"
+    try:
+        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
+    except Exception:
+        return None
+    if chat.type != "private" or not chat.photo or not chat.photo.big_file_id:
+        return None
+    try:
+        file = await asyncio.wait_for(bot.get_file(chat.photo.big_file_id), timeout=3.0)
+    except Exception:
+        return None
+    if not file.file_path:
+        return None
+
+    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+    try:
+        async with bot.session.get(file_url, timeout=4.0) as resp:
+            if resp.status != 200:
+                return None
+            content = await resp.read()
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            return content, content_type
+    except Exception:
+        return None
 
 
 def build_contact_insight_text(target: str) -> Optional[str]:
@@ -561,6 +664,21 @@ async def process_feedback_submission(
 
     message = "Мнение обновлено." if result == "updated" else "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти."
     return result, message
+
+
+async def validate_feedback_target(bot: Bot, target: str) -> tuple[bool, Optional[str]]:
+    username = target.lstrip("@").lower()
+    if username.endswith("bot"):
+        return False, "Нельзя оставлять отзывы о ботах."
+    try:
+        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
+    except Exception:
+        return True, None
+    if chat.type in {"group", "supergroup"}:
+        return False, "Нельзя оставлять отзывы о чатах."
+    if chat.type == "channel":
+        return False, "Нельзя оставлять отзывы о каналах."
+    return True, None
 
 
 @router.message(CommandStart())
