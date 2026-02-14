@@ -120,6 +120,33 @@ def register_user(message: types.Message) -> None:
         db.upsert_user(message.from_user.id, f"@{message.from_user.username}")
 
 
+async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
+    try:
+        await asyncio.wait_for(bot.send_message(target_id, text), timeout=3.0)
+        return True
+    except Exception as exc:
+        target_username = db.get_username_by_user_id(target_id) or f"id={target_id}"
+        db.delete_user_by_user_id(target_id)
+
+        admin_id = db.get_user_id_by_username(f"@{ADMIN_USERNAME}")
+        if admin_id:
+            try:
+                reason = f"{type(exc).__name__}: {exc}"
+                await asyncio.wait_for(
+                    bot.send_message(
+                        admin_id,
+                        "Не удалось отправить push пользователю.\n"
+                        f"Пользователь: {target_username}\n"
+                        f"Причина: {reason}\n"
+                        "Пользователь удалён из /users.",
+                    ),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
+        return False
+
+
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, command: CommandObject):
     register_user(message)
@@ -490,10 +517,7 @@ async def on_caution(callback: types.CallbackQuery):
         if target_id and voter_id is not None and db.mark_seen_hint_sent(target, voter_id):
             async def _send_seen_hint() -> None:
                 try:
-                    await asyncio.wait_for(
-                        callback.bot.send_message(target_id, "👁 тебя явно рассматривают"),
-                        timeout=3.0,
-                    )
+                    await send_tracked_push(callback.bot, target_id, "👁 тебя явно рассматривают")
                 except Exception:
                     pass
 
@@ -513,13 +537,7 @@ async def on_caution(callback: types.CallbackQuery):
     if result == "updated":
         async def _send_updated_notify() -> None:
             try:
-                await asyncio.wait_for(
-                    callback.bot.send_message(
-                        target_id,
-                        "⚠️ Мнение одного человека о тебе изменилось.",
-                    ),
-                    timeout=3.0,
-                )
+                await send_tracked_push(callback.bot, target_id, "⚠️ Мнение одного человека о тебе изменилось.")
             except Exception:
                 pass
 
@@ -527,10 +545,7 @@ async def on_caution(callback: types.CallbackQuery):
     else:
         async def _send_notify() -> None:
             try:
-                await asyncio.wait_for(
-                    callback.bot.send_message(target_id, random.choice(NEW_ANSWER_HINTS)),
-                    timeout=3.0,
-                )
+                await send_tracked_push(callback.bot, target_id, random.choice(NEW_ANSWER_HINTS))
             except Exception:
                 pass
 
@@ -542,12 +557,10 @@ async def on_caution(callback: types.CallbackQuery):
     if rec_before != rec_after:
         async def _send_recommendation_changed_hint() -> None:
             try:
-                await asyncio.wait_for(
-                    callback.bot.send_message(
-                        target_id,
-                        "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
-                    ),
-                    timeout=3.0,
+                await send_tracked_push(
+                    callback.bot,
+                    target_id,
+                    "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
                 )
             except Exception:
                 pass
@@ -557,10 +570,7 @@ async def on_caution(callback: types.CallbackQuery):
     if before_total <= 5 < total:
         async def _send_hype_hint() -> None:
             try:
-                await asyncio.wait_for(
-                    callback.bot.send_message(target_id, "🔥 вокруг тебя начинается движ"),
-                    timeout=3.0,
-                )
+                await send_tracked_push(callback.bot, target_id, "🔥 вокруг тебя начинается движ")
             except Exception:
                 pass
 

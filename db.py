@@ -691,6 +691,52 @@ def list_users(limit: int = 100) -> List[str]:
     return [row[0] for row in rows]
 
 
+def get_username_by_user_id(user_id: int) -> Optional[str]:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT username FROM users WHERE user_id = %s", (user_id,))
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB get_username_by_user_id failed: %s", exc)
+            return None
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+    if not row:
+        return None
+    return str(row[0])
+
+
+def delete_user_by_user_id(user_id: int) -> None:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+                    conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB delete_user_by_user_id failed: %s", exc)
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            with conn:
+                conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        finally:
+            conn.close()
+
+
 def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
     fields = {
         "tone": ("easy", "serious"),
