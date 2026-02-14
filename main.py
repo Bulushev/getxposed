@@ -29,6 +29,7 @@ health_app = Flask(__name__)
 
 USERNAME_RE = re.compile(r"^@([A-Za-z0-9_]{3,32})$")
 WAITING_FOR_USERNAME: set[int] = set()
+WAITING_FOR_INSIGHT_USERNAME: set[int] = set()
 NEW_ANSWER_HINTS = [
     "👀 Появился новый взгляд",
     "⚡ Картина стала чуть точнее",
@@ -96,7 +97,8 @@ def build_main_kb() -> types.ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
     kb.button(text="👀 Посмотреть себя")
     kb.button(text="✍️ Ответить про человека")
-    kb.adjust(2)
+    kb.button(text="🧭 Узнать о человеке")
+    kb.adjust(2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 
@@ -118,6 +120,61 @@ def build_share_kb(link: str) -> types.InlineKeyboardMarkup:
 def register_user(message: types.Message) -> None:
     if message.from_user and message.from_user.id and message.from_user.username:
         db.upsert_user(message.from_user.id, f"@{message.from_user.username}")
+
+
+def build_contact_insight_text(target: str) -> Optional[str]:
+    total = db.get_total(target)
+    if total < 3:
+        return None
+
+    dimensions = db.get_contact_dimensions(target)
+    tone_counts = dimensions["tone"]
+    speed_counts = dimensions["speed"]
+    format_counts = dimensions["contact_format"]
+    caution_counts = dimensions["caution"]
+
+    tone_pick = "easy" if tone_counts["easy"] >= tone_counts["serious"] else "serious"
+    speed_pick = "slow" if speed_counts["slow"] >= speed_counts["fast"] else "fast"
+    format_pick = "text" if format_counts["text"] >= format_counts["live"] else "live"
+
+    tone_text = "с юмора" if tone_pick == "easy" else "спокойно, по делу"
+    speed_text = "не торопясь" if speed_pick == "slow" else "сразу"
+    format_text = "через переписку" if format_pick == "text" else "в живом общении"
+
+    lines = [
+        "Как с этим человеком чаще всего",
+        "начинают общение:",
+        "",
+        f"👉 {tone_text}",
+        f"👉 {speed_text}",
+        f"👉 {format_text}",
+    ]
+
+    def no_clear_majority(a: int, b: int) -> bool:
+        s = a + b
+        return s > 0 and max(a, b) / s < 0.6
+
+    uncertain = (
+        no_clear_majority(tone_counts["easy"], tone_counts["serious"])
+        or no_clear_majority(speed_counts["fast"], speed_counts["slow"])
+        or no_clear_majority(format_counts["text"], format_counts["live"])
+    )
+    if uncertain:
+        lines += [
+            "",
+            "По этому пункту мнения разделились —",
+            "лучше ориентироваться по ситуации.",
+        ]
+
+    caution_ratio = caution_counts["true"] / total if total > 0 else 0
+    if caution_ratio >= 0.3:
+        lines += [
+            "",
+            "⚠️ Иногда лучше не давить",
+            "и дать время.",
+        ]
+
+    return "\n".join(lines)
 
 
 async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
@@ -288,6 +345,7 @@ async def on_text(message: types.Message):
     if text.startswith("/"):
         if message.from_user:
             WAITING_FOR_USERNAME.discard(message.from_user.id)
+            WAITING_FOR_INSIGHT_USERNAME.discard(message.from_user.id)
         return
     lowered = text.lower()
     if lowered in ("мой профиль", "👀 посмотреть себя", "👀 посмотреть про себя"):
@@ -407,6 +465,11 @@ async def on_text(message: types.Message):
             reply_markup=build_main_kb(),
         )
         return
+    if lowered in ("узнать о человеке", "🧭 узнать о человеке"):
+        if message.from_user:
+            WAITING_FOR_INSIGHT_USERNAME.add(message.from_user.id)
+        await message.answer("Укажи @username, про кого хочешь узнать.", reply_markup=build_main_kb())
+        return
     if message.from_user and message.from_user.id in WAITING_FOR_USERNAME:
         target = normalize_username(text)
         if not target:
@@ -417,6 +480,18 @@ async def on_text(message: types.Message):
             "Как бы ты начал разговор?",
             reply_markup=build_tone_kb(target),
         )
+        return
+    if message.from_user and message.from_user.id in WAITING_FOR_INSIGHT_USERNAME:
+        target = normalize_username(text)
+        if not target:
+            await message.answer("Нужен корректный @username.", reply_markup=build_main_kb())
+            return
+        WAITING_FOR_INSIGHT_USERNAME.discard(message.from_user.id)
+        insight_text = build_contact_insight_text(target)
+        if not insight_text:
+            await message.answer("Пока недостаточно ответов по этому человеку.", reply_markup=build_main_kb())
+            return
+        await message.answer(insight_text, reply_markup=build_main_kb())
         return
     target = normalize_username(text)
     if not target:
