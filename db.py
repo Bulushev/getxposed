@@ -1,6 +1,7 @@
 import logging
 import os
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -10,7 +11,6 @@ USE_POSTGRES = DATABASE_URL.lower().startswith("postgres")
 
 if USE_POSTGRES:
     import psycopg
-    from psycopg import errors as pg_errors
 
 
 def _get_sqlite_conn() -> sqlite3.Connection:
@@ -186,21 +186,61 @@ def add_vote(
     speed: str = "slow",
     contact_format: str = "text",
     caution: str = "false",
-) -> Optional[bool]:
+) -> Optional[str]:
+    cooldown = timedelta(hours=24)
+
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
+                    if voter_id is None:
+                        cur.execute(
+                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                            (target, label, tone, speed, contact_format, caution, voter_id),
+                        )
+                        conn.commit()
+                        return "inserted"
+
                     cur.execute(
-                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (target, label, tone, speed, contact_format, caution, voter_id),
+                        """
+                        SELECT id, created_at
+                        FROM votes
+                        WHERE target = %s AND voter_id = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (target, voter_id),
                     )
-                    conn.commit()
-                return True
-            except pg_errors.UniqueViolation:
-                conn.rollback()
-                return False
+                    row = cur.fetchone()
+                    if not row:
+                        cur.execute(
+                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                            (target, label, tone, speed, contact_format, caution, voter_id),
+                        )
+                        conn.commit()
+                        return "inserted"
+
+                    vote_id = int(row[0])
+                    last_ts = row[1]
+                    if isinstance(last_ts, datetime) and datetime.utcnow() - last_ts.replace(tzinfo=None) >= cooldown:
+                        cur.execute(
+                            """
+                            UPDATE votes
+                            SET label = %s,
+                                tone = %s,
+                                speed = %s,
+                                contact_format = %s,
+                                caution = %s,
+                                created_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (label, tone, speed, contact_format, caution, vote_id),
+                        )
+                        conn.commit()
+                        return "updated"
+
+                    return "duplicate_recent"
             finally:
                 conn.close()
         except Exception as exc:
@@ -210,13 +250,57 @@ def add_vote(
         conn = _get_sqlite_conn()
         try:
             with conn:
-                conn.execute(
-                    "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (target, label, tone, speed, contact_format, caution, voter_id),
+                if voter_id is None:
+                    conn.execute(
+                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (target, label, tone, speed, contact_format, caution, voter_id),
+                    )
+                    return "inserted"
+
+                cur = conn.execute(
+                    """
+                    SELECT id, created_at
+                    FROM votes
+                    WHERE target = ? AND voter_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (target, voter_id),
                 )
-            return True
+                row = cur.fetchone()
+                if not row:
+                    conn.execute(
+                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (target, label, tone, speed, contact_format, caution, voter_id),
+                    )
+                    return "inserted"
+
+                vote_id = int(row[0])
+                ts_raw = row[1]
+                try:
+                    last_ts = datetime.fromisoformat(str(ts_raw))
+                except ValueError:
+                    last_ts = datetime.strptime(str(ts_raw), "%Y-%m-%d %H:%M:%S")
+
+                if datetime.utcnow() - last_ts >= cooldown:
+                    conn.execute(
+                        """
+                        UPDATE votes
+                        SET label = ?,
+                            tone = ?,
+                            speed = ?,
+                            contact_format = ?,
+                            caution = ?,
+                            created_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (label, tone, speed, contact_format, caution, vote_id),
+                    )
+                    return "updated"
+
+                return "duplicate_recent"
         except sqlite3.IntegrityError:
-            return False
+            return "duplicate_recent"
         finally:
             conn.close()
 

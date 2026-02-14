@@ -481,11 +481,11 @@ async def on_caution(callback: types.CallbackQuery):
     before_total = db.get_total(target)
     before_dimensions = db.get_contact_dimensions(target)
     rec_before = pick_recommendation(before_dimensions)
-    ok = db.add_vote(target, "feedback", voter_id, tone, speed, contact_format, caution)
-    if ok is None:
+    result = db.add_vote(target, "feedback", voter_id, tone, speed, contact_format, caution)
+    if result is None:
         await callback.answer("База недоступна, попробуй позже", show_alert=True)
         return
-    if not ok:
+    if result == "duplicate_recent":
         target_id = db.get_user_id_by_username(target)
         if target_id and voter_id is not None and db.mark_seen_hint_sent(target, voter_id):
             async def _send_seen_hint() -> None:
@@ -498,11 +498,11 @@ async def on_caution(callback: types.CallbackQuery):
                     pass
 
             asyncio.create_task(_send_seen_hint())
-        await callback.answer("Вы уже оценивали этого пользователя", show_alert=True)
+        await callback.answer("Мнение можно менять не чаще 1 раза в сутки", show_alert=True)
         return
     await callback.answer("Принято")
     await callback.message.answer(
-        "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти.",
+        "Мнение обновлено." if result == "updated" else "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти.",
         reply_markup=build_after_rate_kb(),
     )
 
@@ -510,16 +510,31 @@ async def on_caution(callback: types.CallbackQuery):
     if not target_id:
         return
 
-    async def _send_notify() -> None:
-        try:
-            await asyncio.wait_for(
-                callback.bot.send_message(target_id, random.choice(NEW_ANSWER_HINTS)),
-                timeout=3.0,
-            )
-        except Exception:
-            pass
+    if result == "updated":
+        async def _send_updated_notify() -> None:
+            try:
+                await asyncio.wait_for(
+                    callback.bot.send_message(
+                        target_id,
+                        "⚠️ Мнение одного человека о тебе изменилось.",
+                    ),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
 
-    asyncio.create_task(_send_notify())
+        asyncio.create_task(_send_updated_notify())
+    else:
+        async def _send_notify() -> None:
+            try:
+                await asyncio.wait_for(
+                    callback.bot.send_message(target_id, random.choice(NEW_ANSWER_HINTS)),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
+
+        asyncio.create_task(_send_notify())
 
     after_dimensions = db.get_contact_dimensions(target)
     rec_after = pick_recommendation(after_dimensions)
