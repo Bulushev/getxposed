@@ -90,12 +90,13 @@
       if (!field || !value) return;
       const group = btn.closest(".choice-group");
       const groupIndex = group ? Number(group.dataset.step || -1) : -1;
-      if (groupIndex !== answerFlowStep) return;
+      // Allow changing already opened steps; block only steps not opened yet.
+      if (groupIndex < 0 || groupIndex > answerFlowStep) return;
       selected[field] = value;
       document.querySelectorAll(`.choice-btn[data-field="${field}"]`).forEach((b) => {
         b.classList.toggle("active", b === btn);
       });
-      if (field === ANSWER_FIELDS[answerFlowStep]) {
+      if (groupIndex === answerFlowStep && field === ANSWER_FIELDS[answerFlowStep]) {
         revealNextAnswerStep();
       }
     });

@@ -45,6 +45,7 @@ NEW_ANSWER_HINTS = [
     "🔍 Кто-то помог уточнить первый шаг",
 ]
 INITDATA_MAX_AGE_SECONDS = 86400
+PUSH_TIMEOUT_SECONDS = 15.0
 
 
 def normalize_username(raw: str) -> Optional[str]:
@@ -650,7 +651,7 @@ def build_contact_insight_text(target: str) -> Optional[str]:
 
 async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
     try:
-        await asyncio.wait_for(bot.send_message(target_id, text), timeout=3.0)
+        await asyncio.wait_for(bot.send_message(target_id, text), timeout=PUSH_TIMEOUT_SECONDS)
         return True
     except Exception as exc:
         target_username = (await db_call(db.get_username_by_user_id, target_id)) or f"id={target_id}"
@@ -676,7 +677,7 @@ async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
                         f"Причина: {reason}\n"
                         + ("Пользователь удалён из /users." if should_delete else "Пользователь НЕ удалён (временная ошибка)."),
                     ),
-                    timeout=3.0,
+                    timeout=PUSH_TIMEOUT_SECONDS,
                 )
             except Exception:
                 pass
