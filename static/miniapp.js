@@ -39,6 +39,7 @@
     caution: "",
   };
   let showingForeignProfile = false;
+  let ownProfileLink = "";
   let answerFlowTarget = "";
   let answerFlowStep = -1;
   const ANSWER_FIELDS = ["tone", "speed", "contact_format", "caution"];
@@ -59,6 +60,19 @@
     tabProfile.classList.remove("active");
     tabAnswer.classList.remove("active");
     tabInsight.classList.add("active");
+    updateShareState();
+  }
+
+  function updateShareState() {
+    if (!copyLink) return;
+    if (showingForeignProfile) {
+      copyLink.disabled = true;
+      copyLink.textContent = "Поделиться";
+      copyLink.title = "Можно делиться только своим профилем";
+    } else {
+      copyLink.disabled = false;
+      copyLink.title = "";
+    }
   }
 
   tabProfile.addEventListener("click", async () => {
@@ -222,6 +236,8 @@
       const resp = await api(endpoint);
       renderProfile(resp.data);
       showingForeignProfile = false;
+      ownProfileLink = (resp.data && resp.data.link) || ownProfileLink;
+      updateShareState();
       authStatus.textContent = "";
     } catch (e) {
       summaryBubble.textContent = "Ошибка: " + e.message;
@@ -251,6 +267,7 @@
         renderProfile(resp.data);
       }
       showingForeignProfile = true;
+      updateShareState();
       authStatus.textContent = "Профиль " + normalized;
       setForeignProfileView();
     } catch (e) {
@@ -468,7 +485,11 @@
   });
 
   copyLink.addEventListener("click", async function () {
-    const text = profileLink.textContent || "";
+    if (showingForeignProfile) {
+      showCopyToast("Можно делиться только своей ссылкой.");
+      return;
+    }
+    const text = ownProfileLink || profileLink.textContent || "";
     if (!text || text === "—") return;
     const shareText = "Предложить оценить меня анонимно";
     const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(text) + "&text=" + encodeURIComponent(shareText);
