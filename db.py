@@ -470,7 +470,10 @@ def get_total(target: str) -> int:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM votes WHERE target = %s", (target,))
+                    cur.execute(
+                        "SELECT COUNT(*) FROM votes WHERE target = %s AND label = 'feedback'",
+                        (target,),
+                    )
                     total = cur.fetchone()[0]
             finally:
                 conn.close()
@@ -480,7 +483,10 @@ def get_total(target: str) -> int:
     else:
         conn = _get_sqlite_conn()
         try:
-            cur = conn.execute("SELECT COUNT(*) FROM votes WHERE target = ?", (target,))
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM votes WHERE target = ? AND label = 'feedback'",
+                (target,),
+            )
             total = cur.fetchone()[0]
         finally:
             conn.close()
@@ -516,7 +522,7 @@ def count_votes() -> int:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM votes")
+                    cur.execute("SELECT COUNT(*) FROM votes WHERE label = 'feedback'")
                     total = cur.fetchone()[0]
             finally:
                 conn.close()
@@ -526,7 +532,7 @@ def count_votes() -> int:
     else:
         conn = _get_sqlite_conn()
         try:
-            cur = conn.execute("SELECT COUNT(*) FROM votes")
+            cur = conn.execute("SELECT COUNT(*) FROM votes WHERE label = 'feedback'")
             total = cur.fetchone()[0]
         finally:
             conn.close()
@@ -544,7 +550,7 @@ def top_voters(limit: int = 10) -> List[Tuple[Optional[str], int]]:
                         SELECT u.username, COUNT(v.id) as cnt
                         FROM votes v
                         LEFT JOIN users u ON u.user_id = v.voter_id
-                        WHERE v.voter_id IS NOT NULL
+                        WHERE v.voter_id IS NOT NULL AND v.label = 'feedback'
                         GROUP BY v.voter_id, u.username
                         ORDER BY cnt DESC
                         LIMIT %s
@@ -565,7 +571,7 @@ def top_voters(limit: int = 10) -> List[Tuple[Optional[str], int]]:
                 SELECT u.username, COUNT(v.id) as cnt
                 FROM votes v
                 LEFT JOIN users u ON u.user_id = v.voter_id
-                WHERE v.voter_id IS NOT NULL
+                WHERE v.voter_id IS NOT NULL AND v.label = 'feedback'
                 GROUP BY v.voter_id
                 ORDER BY cnt DESC
                 LIMIT ?
@@ -586,9 +592,10 @@ def top_targets(limit: int = 10) -> List[Tuple[str, int]]:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT target, COUNT(id) as cnt
-                        FROM votes
-                        GROUP BY target
+                    SELECT target, COUNT(id) as cnt
+                    FROM votes
+                    WHERE label = 'feedback'
+                    GROUP BY target
                         ORDER BY cnt DESC
                         LIMIT %s
                         """,
@@ -607,6 +614,7 @@ def top_targets(limit: int = 10) -> List[Tuple[str, int]]:
                 """
                 SELECT target, COUNT(id) as cnt
                 FROM votes
+                WHERE label = 'feedback'
                 GROUP BY target
                 ORDER BY cnt DESC
                 LIMIT ?
@@ -666,7 +674,7 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
                 with conn.cursor() as cur:
                     for field, options in fields.items():
                         cur.execute(
-                            f"SELECT {field}, COUNT(*) FROM votes WHERE target = %s GROUP BY {field}",
+                            f"SELECT {field}, COUNT(*) FROM votes WHERE target = %s AND label = 'feedback' GROUP BY {field}",
                             (target,),
                         )
                         for value, cnt in cur.fetchall():
@@ -682,7 +690,7 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
         try:
             for field, options in fields.items():
                 cur = conn.execute(
-                    f"SELECT {field}, COUNT(*) FROM votes WHERE target = ? GROUP BY {field}",
+                    f"SELECT {field}, COUNT(*) FROM votes WHERE target = ? AND label = 'feedback' GROUP BY {field}",
                     (target,),
                 )
                 for value, cnt in cur.fetchall():
