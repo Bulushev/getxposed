@@ -171,16 +171,22 @@
     const proxyPhoto = user && user.avatar_url ? String(user.avatar_url) : "";
     const directPhoto = user && user.photo_url ? String(user.photo_url) : "";
     const fallbackPhoto = username ? "https://t.me/i/userpic/320/" + username + ".jpg" : "";
-    const photo = proxyPhoto || directPhoto || fallbackPhoto;
+    const candidates = [directPhoto, proxyPhoto, fallbackPhoto].filter(Boolean);
 
-    if (photo) {
-      avatarImg.src = photo;
+    if (candidates.length > 0) {
+      let idx = 0;
       avatarImg.style.display = "block";
       avatarFallback.style.display = "none";
       avatarImg.onerror = function () {
-        avatarImg.style.display = "none";
-        avatarFallback.style.display = "grid";
+        idx += 1;
+        if (idx >= candidates.length) {
+          avatarImg.style.display = "none";
+          avatarFallback.style.display = "grid";
+          return;
+        }
+        avatarImg.src = candidates[idx];
       };
+      avatarImg.src = candidates[idx];
     } else {
       avatarImg.style.display = "none";
       avatarFallback.style.display = "grid";

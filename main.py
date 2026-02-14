@@ -91,24 +91,36 @@ def api_miniapp_me():
         return jsonify({"ok": False, "error": "Укажи @username в Telegram профиле"}), 400
 
     user_id = int(user.get("id"))
+    first_name = str(user.get("first_name") or "")
+    last_name = str(user.get("last_name") or "")
+    init_photo_url = str(user.get("photo_url") or "")
     db.upsert_user(
         user_id,
         f"@{username}",
-        str(user.get("first_name") or ""),
-        str(user.get("last_name") or ""),
-        str(user.get("photo_url") or ""),
+        first_name,
+        last_name,
+        init_photo_url,
     )
     target = f"@{username}"
     payload = build_profile_payload(target)
     bot_username = get_bot_public_username()
     payload["link"] = f"https://t.me/{bot_username}?start=ref_{username}"
-    payload["user"] = db.get_user_public_by_username(target) or {
+    stored_user = db.get_user_public_by_username(target) or {}
+    payload["user"] = {
+        "id": int(stored_user.get("id") or user_id),
+        "username": str(stored_user.get("username") or username),
+        "first_name": str(stored_user.get("first_name") or first_name),
+        "last_name": str(stored_user.get("last_name") or last_name),
+        "photo_url": str(stored_user.get("photo_url") or init_photo_url),
+    }
+    if not payload["user"]["username"]:
+        payload["user"] = {
         "id": user_id,
         "username": username,
-        "first_name": str(user.get("first_name") or ""),
-        "last_name": str(user.get("last_name") or ""),
-        "photo_url": str(user.get("photo_url") or ""),
-    }
+        "first_name": first_name,
+        "last_name": last_name,
+        "photo_url": init_photo_url,
+        }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
     return jsonify({"ok": True, "data": payload})
 
