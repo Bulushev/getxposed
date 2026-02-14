@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import random
 import re
 from urllib.parse import quote_plus
 from typing import Optional
@@ -28,29 +27,8 @@ logging.basicConfig(level=logging.WARNING)
 router = Router()
 health_app = Flask(__name__)
 
-RATINGS = [
-    "🔥 горячий",
-    "⚡ магнит",
-    "💔 краш",
-    "👀 странный",
-    "🗿 мутный",
-    "🤯 непредсказуемый",
-    "😈 опасный",
-    "🚩 ред флаг",
-]
-
 USERNAME_RE = re.compile(r"^@([A-Za-z0-9_]{3,32})$")
 WAITING_FOR_USERNAME: set[int] = set()
-NOTIFY_TEXTS = {
-    "🔥 горячий": "🔥 осторожно.\nкто-то явно на тебя залип.",
-    "⚡ магнит": "⚡ сопротивляться тебе сложно.\nи кто-то это только что подтвердил.",
-    "💔 краш": "💔 кто-то в тебя втрескался.\nи явно не собирается признаваться 🙂",
-    "👀 странный": "👀 тебя только что назвали странным.\nв хорошем смысле…\nнаверное.",
-    "🗿 мутный": "🗿 кто-то вообще не понимает, что у тебя в голове.",
-    "🤯 непредсказуемый": "🤯 ты явно делаешь неожиданные вещи.\nи люди это запоминают.",
-    "😈 опасный": "😈 с тобой явно не всё так просто.\nи кто-то это уже понял.",
-    "🚩 ред флаг": "🚩 похоже, рядом с тобой у кого-то включается режим \"осторожно\".",
-}
 NEW_ANSWER_HINTS = [
     "👀 Появился новый взгляд",
     "⚡ Картина стала чуть точнее",
@@ -64,23 +42,6 @@ def normalize_username(raw: str) -> Optional[str]:
     if not m:
         return None
     return f"@{m.group(1)}"
-
-
-def build_rating_kb(
-    target: str,
-    tone: str,
-    speed: str,
-    contact_format: str,
-    caution: str,
-) -> types.InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    for idx, label in enumerate(RATINGS):
-        kb.button(
-            text=label,
-            callback_data=f"rate|{idx}|{target}|{tone}|{speed}|{contact_format}|{caution}",
-        )
-    kb.adjust(2, 2, 2)
-    return kb.as_markup()
 
 
 def build_tone_kb(target: str) -> types.InlineKeyboardMarkup:
@@ -226,18 +187,20 @@ async def cmd_stats(message: types.Message):
         await message.answer("Нужен корректный @username.", reply_markup=build_main_kb())
         return
 
-    rows = db.get_stats(target)
     total = db.get_total(target)
     if total == 0:
         await message.answer(f"Пока нет оценок для {target}.", reply_markup=build_main_kb())
         return
 
-    lines = [f"Статистика для {target} (всего {total}):"]
-    counts = {label: 0 for label in RATINGS}
-    for label, cnt in rows:
-        counts[label] = cnt
-    for label in RATINGS:
-        lines.append(f"{label}: {counts[label]}")
+    dims = db.get_contact_dimensions(target)
+    lines = [
+        f"Статистика для {target}:",
+        f"Всего ответов: {total}",
+        f"Tone easy/serious: {dims['tone']['easy']}/{dims['tone']['serious']}",
+        f"Speed fast/slow: {dims['speed']['fast']}/{dims['speed']['slow']}",
+        f"Format text/live: {dims['contact_format']['text']}/{dims['contact_format']['live']}",
+        f"Caution true/false: {dims['caution']['true']}/{dims['caution']['false']}",
+    ]
     await message.answer("\n".join(lines), reply_markup=build_main_kb())
 
 
@@ -310,16 +273,12 @@ async def on_text(message: types.Message):
         target = f"@{message.from_user.username}"
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start=ref_{message.from_user.username}"
-        rows = db.get_stats(target)
         total = db.get_total(target)
         ref_count = db.count_ref_visitors(target)
         combined = total + ref_count
         viewed = int(combined * 1.4)
         silent = max(0, viewed - total)
 
-        counts = {label: 0 for label in RATINGS}
-        for label, cnt in rows:
-            counts[label] = cnt
         dimensions = db.get_contact_dimensions(target)
 
         lines = [
@@ -366,7 +325,8 @@ async def on_text(message: types.Message):
                 "— — —",
             ]
 
-            redflag_ratio = counts.get("🚩 ред флаг", 0) / total if total > 0 else 0
+            caution_counts = dimensions["caution"]
+            redflag_ratio = caution_counts["true"] / total if total > 0 else 0
             if redflag_ratio >= 0.3:
                 lines += [
                     "",
@@ -392,11 +352,6 @@ async def on_text(message: types.Message):
                     "мнения разделились —",
                     "лучше ориентироваться по ситуации.",
                 ]
-
-            lines += ["", "метки:"]
-            for label in RATINGS:
-                if counts[label] > 0:
-                    lines.append(f"{label} — {counts[label]}")
 
         text = "\n".join(lines)
         reply_kb = build_after_rate_kb() if total < 3 else build_main_kb()
@@ -525,49 +480,11 @@ async def on_caution(callback: types.CallbackQuery):
     if contact_format not in {"text", "live"}:
         contact_format = "text"
 
-    await callback.answer("Принято")
-    await callback.message.answer(
-        f"Оцени пользователя {target}:",
-        reply_markup=build_rating_kb(target, tone, speed, contact_format, caution),
-    )
-
-
-@router.callback_query(F.data.startswith("rate|"))
-async def on_rate(callback: types.CallbackQuery):
-    parts = (callback.data or "").split("|", 6)
-    if len(parts) not in (3, 4, 5, 6, 7):
-        await callback.answer("Некорректные данные", show_alert=True)
-        return
-    _, idx_str, target = parts[:3]
-    tone = parts[3] if len(parts) == 4 else "serious"
-    speed = parts[4] if len(parts) == 5 else "slow"
-    contact_format = parts[5] if len(parts) == 6 else "text"
-    caution = parts[6] if len(parts) == 7 else "false"
-    if tone not in {"easy", "serious"}:
-        tone = "serious"
-    if speed not in {"fast", "slow"}:
-        speed = "slow"
-    if contact_format not in {"text", "live"}:
-        contact_format = "text"
-    if caution not in {"true", "false"}:
-        caution = "false"
-    try:
-        idx = int(idx_str)
-        label = RATINGS[idx]
-    except Exception:
-        await callback.answer("Некорректная оценка", show_alert=True)
-        return
-
+    voter_id = callback.from_user.id if callback.from_user else None
     before_total = db.get_total(target)
     before_dimensions = db.get_contact_dimensions(target)
     rec_before = pick_recommendation(before_dimensions)
-    before_rows = db.get_stats(target)
-    before_counts = {k: int(v) for k, v in before_rows}
-    max_before = max(before_counts.values()) if before_counts else 0
-    before_label_count = before_counts.get(label, 0)
-
-    voter_id = callback.from_user.id if callback.from_user else None
-    ok = db.add_vote(target, label, voter_id, tone, speed, contact_format, caution)
+    ok = db.add_vote(target, "feedback", voter_id, tone, speed, contact_format, caution)
     if ok is None:
         await callback.answer("База недоступна, попробуй позже", show_alert=True)
         return
@@ -586,119 +503,56 @@ async def on_rate(callback: types.CallbackQuery):
             asyncio.create_task(_send_seen_hint())
         await callback.answer("Вы уже оценивали этого пользователя", show_alert=True)
         return
-    await callback.answer("Готово")
+    await callback.answer("Принято")
     await callback.message.answer(
         "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти.",
         reply_markup=build_after_rate_kb(),
     )
 
     target_id = db.get_user_id_by_username(target)
-    current_user = callback.from_user
-    if current_user and current_user.username and target_id:
-        reverse_label = db.get_vote_label(f"@{current_user.username}", target_id)
-        if reverse_label and reverse_label != label:
-            async def _send_reverse_diff_hint() -> None:
-                try:
-                    await asyncio.wait_for(
-                        callback.bot.send_message(
-                            target_id,
-                            "⚡ кто-то увидел тебя совсем иначе",
-                        ),
-                        timeout=3.0,
-                    )
-                except Exception:
-                    pass
+    if not target_id:
+        return
 
-            asyncio.create_task(_send_reverse_diff_hint())
+    async def _send_notify() -> None:
+        try:
+            await asyncio.wait_for(
+                callback.bot.send_message(target_id, random.choice(NEW_ANSWER_HINTS)),
+                timeout=3.0,
+            )
+        except Exception:
+            pass
 
-    if target_id:
-        extra = NOTIFY_TEXTS.get(label, "")
-        text = f"Тебя оценили: {label}"
-        if extra:
-            text = f"{text}\n\n{extra}"
-        text = f"{text}\n\n{random.choice(NEW_ANSWER_HINTS)}"
+    asyncio.create_task(_send_notify())
 
-        async def _send_notify() -> None:
+    after_dimensions = db.get_contact_dimensions(target)
+    rec_after = pick_recommendation(after_dimensions)
+    total = db.get_total(target)
+    if rec_before != rec_after:
+        async def _send_recommendation_changed_hint() -> None:
             try:
-                await asyncio.wait_for(callback.bot.send_message(target_id, text), timeout=3.0)
+                await asyncio.wait_for(
+                    callback.bot.send_message(
+                        target_id,
+                        "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
+                    ),
+                    timeout=3.0,
+                )
             except Exception:
-                # User might have blocked the bot, or network is slow.
                 pass
 
-        asyncio.create_task(_send_notify())
+        asyncio.create_task(_send_recommendation_changed_hint())
 
-        rows_after = db.get_stats(target)
-        after_dimensions = db.get_contact_dimensions(target)
-        rec_after = pick_recommendation(after_dimensions)
-        counts_after = {k: int(v) for k, v in rows_after}
-        after_label_count = counts_after.get(label, 0)
-        if rec_before != rec_after:
-            async def _send_recommendation_changed_hint() -> None:
-                try:
-                    await asyncio.wait_for(
-                        callback.bot.send_message(
-                            target_id,
-                            "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
-                        ),
-                        timeout=3.0,
-                    )
-                except Exception:
-                    pass
+    if before_total <= 5 < total:
+        async def _send_hype_hint() -> None:
+            try:
+                await asyncio.wait_for(
+                    callback.bot.send_message(target_id, "🔥 вокруг тебя начинается движ"),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
 
-            asyncio.create_task(_send_recommendation_changed_hint())
-
-        if len(counts_after) >= 2 and after_label_count > max_before and before_label_count <= max_before:
-            async def _send_shift_hint() -> None:
-                try:
-                    await asyncio.wait_for(
-                        callback.bot.send_message(
-                            target_id,
-                            "👀 похоже, мнение о тебе начинает меняться",
-                        ),
-                        timeout=3.0,
-                    )
-                except Exception:
-                    pass
-
-            asyncio.create_task(_send_shift_hint())
-
-        # Outlier hint: 5+ votes and this label is a rare outlier vs dominant pattern.
-        total = db.get_total(target)
-        if before_total <= 5 < total:
-            async def _send_hype_hint() -> None:
-                try:
-                    await asyncio.wait_for(
-                        callback.bot.send_message(
-                            target_id,
-                            "🔥 вокруг тебя начинается движ",
-                        ),
-                        timeout=3.0,
-                    )
-                except Exception:
-                    pass
-
-            asyncio.create_task(_send_hype_hint())
-
-        if total >= 5:
-            rows = db.get_stats(target)
-            counts = {k: int(v) for k, v in rows}
-            current = counts.get(label, 0)
-            others = [v for k, v in counts.items() if k != label]
-            max_other = max(others) if others else 0
-            if current == 1 and max_other >= 3:
-                async def _send_outlier_hint() -> None:
-                    try:
-                        await asyncio.wait_for(
-                            callback.bot.send_message(
-                                target_id,
-                                "⚠️ один из ответов сильно отличается от остальных…",
-                            ),
-                            timeout=3.0,
-                        )
-                    except Exception:
-                        pass
-
-                asyncio.create_task(_send_outlier_hint())
+        asyncio.create_task(_send_hype_hint())
 
 
 async def main():

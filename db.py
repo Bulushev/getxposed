@@ -380,79 +380,6 @@ def get_user_id_by_username(username: str) -> Optional[int]:
     return int(row[0])
 
 
-def get_vote_label(target: str, voter_id: int) -> Optional[str]:
-    if USE_POSTGRES:
-        try:
-            conn = _get_pg_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT label
-                        FROM votes
-                        WHERE target = %s AND voter_id = %s
-                        ORDER BY id DESC
-                        LIMIT 1
-                        """,
-                        (target, voter_id),
-                    )
-                    row = cur.fetchone()
-            finally:
-                conn.close()
-        except Exception as exc:
-            logging.warning("DB get_vote_label failed: %s", exc)
-            return None
-    else:
-        conn = _get_sqlite_conn()
-        try:
-            cur = conn.execute(
-                """
-                SELECT label
-                FROM votes
-                WHERE target = ? AND voter_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (target, voter_id),
-            )
-            row = cur.fetchone()
-        finally:
-            conn.close()
-
-    if not row:
-        return None
-    return str(row[0])
-
-
-def get_stats(target: str) -> List[Tuple[str, int]]:
-    if USE_POSTGRES:
-        try:
-            conn = _get_pg_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT label, COUNT(*) FROM votes WHERE target = %s GROUP BY label",
-                        (target,),
-                    )
-                    rows = cur.fetchall()
-            finally:
-                conn.close()
-        except Exception as exc:
-            logging.warning("DB get_stats failed: %s", exc)
-            return []
-    else:
-        conn = _get_sqlite_conn()
-        try:
-            cur = conn.execute(
-                "SELECT label, COUNT(*) FROM votes WHERE target = ? GROUP BY label",
-                (target,),
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-    return [(row[0], int(row[1])) for row in rows]
-
-
 def get_total(target: str) -> int:
     if USE_POSTGRES:
         try:
@@ -642,6 +569,7 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
         "tone": ("easy", "serious"),
         "speed": ("fast", "slow"),
         "contact_format": ("text", "live"),
+        "caution": ("true", "false"),
     }
     result: dict[str, dict[str, int]] = {
         key: {option: 0 for option in options} for key, options in fields.items()
