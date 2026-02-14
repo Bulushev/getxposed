@@ -361,19 +361,21 @@ def add_vote(
             conn.close()
 
 
-def upsert_user(
+def upsert_user_with_flag(
     user_id: int,
     username: str,
     first_name: str = "",
     last_name: str = "",
     photo_url: str = "",
-) -> None:
+) -> bool:
     username = username.lower()
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (user_id,))
+                    existed = cur.fetchone() is not None
                     cur.execute(
                         "DELETE FROM users WHERE LOWER(username) = LOWER(%s) AND user_id <> %s",
                         (username, user_id),
@@ -392,14 +394,18 @@ def upsert_user(
                         (user_id, username, first_name, last_name, photo_url),
                     )
                     conn.commit()
+                    return not existed
             finally:
                 conn.close()
         except Exception as exc:
             logging.warning("DB upsert_user failed: %s", exc)
+            return False
     else:
         conn = _get_sqlite_conn()
         try:
             with conn:
+                cur = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (user_id,))
+                existed = cur.fetchone() is not None
                 conn.execute(
                     "DELETE FROM users WHERE LOWER(username) = LOWER(?) AND user_id <> ?",
                     (username, user_id),
@@ -417,8 +423,19 @@ def upsert_user(
                     """,
                     (user_id, username, first_name, last_name, photo_url),
                 )
+                return not existed
         finally:
             conn.close()
+
+
+def upsert_user(
+    user_id: int,
+    username: str,
+    first_name: str = "",
+    last_name: str = "",
+    photo_url: str = "",
+) -> None:
+    upsert_user_with_flag(user_id, username, first_name, last_name, photo_url)
 
 
 def get_user_public_by_username(username: str) -> Optional[dict]:

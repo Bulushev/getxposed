@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -94,13 +95,15 @@ def api_miniapp_me():
     first_name = str(user.get("first_name") or "")
     last_name = str(user.get("last_name") or "")
     init_photo_url = str(user.get("photo_url") or "")
-    db.upsert_user(
+    is_new = db.upsert_user_with_flag(
         user_id,
         f"@{username}",
         first_name,
         last_name,
         init_photo_url,
     )
+    if is_new and APP_BOT:
+        queue_coroutine(notify_admin_new_user(APP_BOT, user_id, f"@{username}", "miniapp"))
     target = f"@{username}"
     payload = build_profile_payload(target)
     bot_username = get_bot_public_username()
@@ -331,13 +334,15 @@ def api_miniapp_feedback():
     voter_id = int(user.get("id"))
     username = str(user.get("username") or "").strip().lower()
     if username:
-        db.upsert_user(
+        is_new = db.upsert_user_with_flag(
             voter_id,
             f"@{username}",
             str(user.get("first_name") or ""),
             str(user.get("last_name") or ""),
             str(user.get("photo_url") or ""),
         )
+        if is_new and APP_BOT:
+            queue_coroutine(notify_admin_new_user(APP_BOT, voter_id, f"@{username}", "miniapp"))
 
     future = asyncio.run_coroutine_threadsafe(
         process_feedback_submission(
@@ -376,13 +381,54 @@ def build_launch_kb() -> Optional[types.InlineKeyboardMarkup]:
     return kb.as_markup()
 
 
+async def notify_admin_new_user(bot: Bot, user_id: int, username: str, source: str) -> None:
+    admin_id = await db_call(db.get_user_id_by_username, f"@{ADMIN_USERNAME}")
+    if not admin_id or admin_id == user_id:
+        return
+    text = (
+        "Новый пользователь в приложении.\n"
+        f"Username: {username}\n"
+        f"ID: {user_id}\n"
+        f"Источник: {source}"
+    )
+    try:
+        await asyncio.wait_for(bot.send_message(admin_id, text), timeout=3.0)
+    except Exception:
+        pass
+
+
+async def upsert_user_and_maybe_notify(
+    bot: Bot,
+    user_id: int,
+    username: str,
+    first_name: str = "",
+    last_name: str = "",
+    photo_url: str = "",
+    source: str = "bot",
+) -> None:
+    is_new = await db_call(
+        db.upsert_user_with_flag,
+        user_id,
+        username,
+        first_name,
+        last_name,
+        photo_url,
+    )
+    if is_new:
+        await notify_admin_new_user(bot, user_id, username, source)
+
+
 def register_user(message: types.Message) -> None:
-    if message.from_user and message.from_user.id and message.from_user.username:
+    if message.from_user and message.from_user.id and message.from_user.username and message.bot:
         asyncio.create_task(
-            asyncio.to_thread(
-                db.upsert_user,
+            upsert_user_and_maybe_notify(
+                message.bot,
                 message.from_user.id,
                 f"@{message.from_user.username.lower()}",
+                str(message.from_user.first_name or ""),
+                str(message.from_user.last_name or ""),
+                "",
+                "bot",
             )
         )
 
@@ -530,19 +576,19 @@ async def fetch_avatar_from_telegram(bot: Bot, username: str) -> Optional[tuple[
         return None
     try:
         file = await asyncio.wait_for(bot.get_file(chat.photo.big_file_id), timeout=3.0)
-    except Exception:
-        return None
-    if not file.file_path:
-        return None
-
-    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-    try:
-        async with bot.session.get(file_url, timeout=4.0) as resp:
-            if resp.status != 200:
-                return None
-            content = await resp.read()
-            content_type = resp.headers.get("Content-Type", "image/jpeg")
-            return content, content_type
+        buf = io.BytesIO()
+        await asyncio.wait_for(bot.download(file, destination=buf), timeout=5.0)
+        content = buf.getvalue()
+        if not content:
+            return None
+        path = (file.file_path or "").lower()
+        if path.endswith(".png"):
+            ctype = "image/png"
+        elif path.endswith(".webp"):
+            ctype = "image/webp"
+        else:
+            ctype = "image/jpeg"
+        return content, ctype
     except Exception:
         return None
 
@@ -608,19 +654,27 @@ async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
         return True
     except Exception as exc:
         target_username = (await db_call(db.get_username_by_user_id, target_id)) or f"id={target_id}"
-        await db_call(db.delete_user_by_user_id, target_id)
+        reason = f"{type(exc).__name__}: {exc}"
+        reason_l = reason.lower()
+        should_delete = (
+            "bot was blocked by the user" in reason_l
+            or "chat not found" in reason_l
+            or "user is deactivated" in reason_l
+            or "forbidden" in reason_l
+        )
+        if should_delete:
+            await db_call(db.delete_user_by_user_id, target_id)
 
         admin_id = await db_call(db.get_user_id_by_username, f"@{ADMIN_USERNAME}")
         if admin_id:
             try:
-                reason = f"{type(exc).__name__}: {exc}"
                 await asyncio.wait_for(
                     bot.send_message(
                         admin_id,
                         "Не удалось отправить push пользователю.\n"
                         f"Пользователь: {target_username}\n"
                         f"Причина: {reason}\n"
-                        "Пользователь удалён из /users.",
+                        + ("Пользователь удалён из /users." if should_delete else "Пользователь НЕ удалён (временная ошибка)."),
                     ),
                     timeout=3.0,
                 )
