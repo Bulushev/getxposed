@@ -52,10 +52,16 @@ def init_db() -> bool:
                         CREATE TABLE IF NOT EXISTS users (
                             user_id BIGINT PRIMARY KEY,
                             username TEXT NOT NULL UNIQUE,
+                            first_name TEXT DEFAULT '',
+                            last_name TEXT DEFAULT '',
+                            photo_url TEXT DEFAULT '',
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
                     )
+                    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''")
+                    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''")
+                    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT DEFAULT ''")
                     cur.execute(
                         """
                         CREATE TABLE IF NOT EXISTS ref_visits (
@@ -135,10 +141,25 @@ def init_db() -> bool:
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
+                    first_name TEXT DEFAULT '',
+                    last_name TEXT DEFAULT '',
+                    photo_url TEXT DEFAULT '',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN first_name TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN last_name TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN photo_url TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS ref_visits (
@@ -340,7 +361,13 @@ def add_vote(
             conn.close()
 
 
-def upsert_user(user_id: int, username: str) -> None:
+def upsert_user(
+    user_id: int,
+    username: str,
+    first_name: str = "",
+    last_name: str = "",
+    photo_url: str = "",
+) -> None:
     username = username.lower()
     if USE_POSTGRES:
         try:
@@ -353,13 +380,16 @@ def upsert_user(user_id: int, username: str) -> None:
                     )
                     cur.execute(
                         """
-                        INSERT INTO users (user_id, username, updated_at)
-                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO users (user_id, username, first_name, last_name, photo_url, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT(user_id) DO UPDATE SET
                             username = EXCLUDED.username,
+                            first_name = EXCLUDED.first_name,
+                            last_name = EXCLUDED.last_name,
+                            photo_url = EXCLUDED.photo_url,
                             updated_at = CURRENT_TIMESTAMP
                         """,
-                        (user_id, username),
+                        (user_id, username, first_name, last_name, photo_url),
                     )
                     conn.commit()
             finally:
@@ -376,16 +406,66 @@ def upsert_user(user_id: int, username: str) -> None:
                 )
                 conn.execute(
                     """
-                    INSERT INTO users (user_id, username, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO users (user_id, username, first_name, last_name, photo_url, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(user_id) DO UPDATE SET
                         username = excluded.username,
+                        first_name = excluded.first_name,
+                        last_name = excluded.last_name,
+                        photo_url = excluded.photo_url,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (user_id, username),
+                    (user_id, username, first_name, last_name, photo_url),
                 )
         finally:
             conn.close()
+
+
+def get_user_public_by_username(username: str) -> Optional[dict]:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT user_id, username, first_name, last_name, photo_url
+                        FROM users
+                        WHERE LOWER(username) = LOWER(%s)
+                        LIMIT 1
+                        """,
+                        (username,),
+                    )
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB get_user_public_by_username failed: %s", exc)
+            return None
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                """
+                SELECT user_id, username, first_name, last_name, photo_url
+                FROM users
+                WHERE LOWER(username) = LOWER(?)
+                LIMIT 1
+                """,
+                (username,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+    if not row:
+        return None
+    return {
+        "id": int(row[0]),
+        "username": str(row[1]).lstrip("@"),
+        "first_name": str(row[2] or ""),
+        "last_name": str(row[3] or ""),
+        "photo_url": str(row[4] or ""),
+    }
 
 
 def normalize_case_data() -> tuple[int, int]:
@@ -791,6 +871,94 @@ def list_users(limit: int = 100) -> List[str]:
         finally:
             conn.close()
     return [row[0] for row in rows]
+
+
+def search_users(query: str, limit: int = 20) -> List[str]:
+    q = query.strip().lower().lstrip("@")
+    if not q:
+        return []
+    pattern = f"@{q}%"
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT username
+                        FROM users
+                        WHERE LOWER(username) LIKE %s
+                        ORDER BY updated_at DESC
+                        LIMIT %s
+                        """,
+                        (pattern, limit),
+                    )
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB search_users failed: %s", exc)
+            return []
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                """
+                SELECT username
+                FROM users
+                WHERE LOWER(username) LIKE ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, limit),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    return [str(row[0]) for row in rows]
+
+
+def list_recent_targets_for_voter(voter_id: int, limit: int = 20) -> List[str]:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT target
+                        FROM votes
+                        WHERE voter_id = %s AND label = 'feedback'
+                        GROUP BY target
+                        ORDER BY MAX(created_at) DESC
+                        LIMIT %s
+                        """,
+                        (voter_id, limit),
+                    )
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB list_recent_targets_for_voter failed: %s", exc)
+            return []
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                """
+                SELECT target
+                FROM votes
+                WHERE voter_id = ? AND label = 'feedback'
+                GROUP BY target
+                ORDER BY MAX(created_at) DESC
+                LIMIT ?
+                """,
+                (voter_id, limit),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    return [str(row[0]) for row in rows]
 
 
 def get_username_by_user_id(user_id: int) -> Optional[str]:

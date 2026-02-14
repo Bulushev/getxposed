@@ -127,11 +127,74 @@ def api_miniapp_me():
         return jsonify({"ok": False, "error": "Укажи @username в Telegram профиле"}), 400
 
     user_id = int(user.get("id"))
-    db.upsert_user(user_id, f"@{username}")
+    db.upsert_user(
+        user_id,
+        f"@{username}",
+        str(user.get("first_name") or ""),
+        str(user.get("last_name") or ""),
+        str(user.get("photo_url") or ""),
+    )
     target = f"@{username}"
     payload = build_profile_payload(target)
     bot_username = get_bot_public_username()
     payload["link"] = f"https://t.me/{bot_username}?start=ref_{username}"
+    payload["user"] = db.get_user_public_by_username(target) or {
+        "id": user_id,
+        "username": username,
+        "first_name": str(user.get("first_name") or ""),
+        "last_name": str(user.get("last_name") or ""),
+        "photo_url": str(user.get("photo_url") or ""),
+    }
+    return jsonify({"ok": True, "data": payload})
+
+
+@health_app.get("/api/miniapp/preview")
+def api_miniapp_preview():
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "target": "@preview_user",
+                "viewed": 18,
+                "answers": 13,
+                "silent": 5,
+                "enough": True,
+                "recommendation": {"tone": "easy", "speed": "slow", "format": "text"},
+                "caution_block": True,
+                "uncertain_block": True,
+                "link": f"https://t.me/{get_bot_public_username()}?start=ref_preview_user",
+                "user": {
+                    "id": 1,
+                    "username": "preview_user",
+                    "first_name": "Preview",
+                    "last_name": "User",
+                    "photo_url": "",
+                },
+            },
+        }
+    )
+
+
+@health_app.get("/api/miniapp/profile")
+def api_miniapp_profile():
+    user = get_webapp_user()
+    if not user:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    raw_target = request.args.get("target", "")
+    target = normalize_username(raw_target)
+    if not target:
+        return jsonify({"ok": False, "error": "Нужен корректный @username"}), 400
+
+    payload = build_profile_payload(target)
+    payload["link"] = f"https://t.me/{get_bot_public_username()}?start=ref_{target.lstrip('@')}"
+    payload["user"] = db.get_user_public_by_username(target) or {
+        "id": 0,
+        "username": target.lstrip("@"),
+        "first_name": "",
+        "last_name": "",
+        "photo_url": "",
+    }
     return jsonify({"ok": True, "data": payload})
 
 
@@ -150,6 +213,72 @@ def api_miniapp_insight():
     if not insight_text:
         return jsonify({"ok": True, "enough": False})
     return jsonify({"ok": True, "enough": True, "text": insight_text})
+
+
+@health_app.get("/api/miniapp/preview-insight")
+def api_miniapp_preview_insight():
+    text = (
+        "Как с этим человеком чаще всего\n"
+        "начинают общение:\n\n"
+        "👉 с юмора\n"
+        "👉 не торопясь\n"
+        "👉 через переписку\n\n"
+        "⚠️ Иногда лучше не давить\n"
+        "и дать время."
+    )
+    return jsonify({"ok": True, "enough": True, "text": text})
+
+
+@health_app.get("/api/miniapp/search-users")
+def api_miniapp_search_users():
+    user = get_webapp_user()
+    if not user:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    q = str(request.args.get("q") or "")
+    items = db.search_users(q, 20)
+    return jsonify({"ok": True, "items": items})
+
+
+@health_app.get("/api/miniapp/preview-users")
+def api_miniapp_preview_users():
+    return jsonify(
+        {
+            "ok": True,
+            "items": [
+                "@bulushew",
+                "@blackgrizzly17",
+                "@pursenka",
+                "@artemeeey",
+                "@taaarraaas",
+            ],
+        }
+    )
+
+
+@health_app.get("/api/miniapp/recent-targets")
+def api_miniapp_recent_targets():
+    user = get_webapp_user()
+    if not user:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    voter_id = int(user.get("id"))
+    items = db.list_recent_targets_for_voter(voter_id, 20)
+    return jsonify({"ok": True, "items": items})
+
+
+@health_app.get("/api/miniapp/preview-recent-targets")
+def api_miniapp_preview_recent_targets():
+    return jsonify(
+        {
+            "ok": True,
+            "items": [
+                "@bulushew",
+                "@pursenka",
+                "@blackgrizzly17",
+                "@artemeeey",
+                "@taaarraaas",
+            ],
+        }
+    )
 
 
 @health_app.post("/api/miniapp/feedback")
@@ -172,7 +301,13 @@ def api_miniapp_feedback():
     voter_id = int(user.get("id"))
     username = str(user.get("username") or "").strip().lower()
     if username:
-        db.upsert_user(voter_id, f"@{username}")
+        db.upsert_user(
+            voter_id,
+            f"@{username}",
+            str(user.get("first_name") or ""),
+            str(user.get("last_name") or ""),
+            str(user.get("photo_url") or ""),
+        )
 
     future = asyncio.run_coroutine_threadsafe(
         process_feedback_submission(
@@ -196,6 +331,11 @@ def api_miniapp_feedback():
     if result == "duplicate_recent":
         return jsonify({"ok": False, "error": message, "code": "duplicate_recent"}), 429
     return jsonify({"ok": True, "result": result, "message": message})
+
+
+@health_app.post("/api/miniapp/preview-feedback")
+def api_miniapp_preview_feedback():
+    return jsonify({"ok": True, "result": "inserted", "message": "Готово 👍 (preview)"})
 
 
 def build_main_kb() -> types.ReplyKeyboardMarkup:

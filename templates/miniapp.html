@@ -3,114 +3,426 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>GetXposed Mini App</title>
+  <title>Profile Mini App</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root {
-      --bg: #111319;
-      --card: #1b1f29;
-      --text: #f2f4f8;
-      --muted: #aab1c2;
-      --accent: #ff6e3d;
-      --line: #2a3040;
+      --bg: var(--tg-theme-bg-color, #17212b);
+      --card: var(--tg-theme-secondary-bg-color, #232e3c);
+      --line: rgba(255, 255, 255, 0.08);
+      --text: var(--tg-theme-text-color, #e6ebf0);
+      --muted: var(--tg-theme-hint-color, #9aa7b5);
+      --blue: var(--tg-theme-button-color, #3390ec);
+      --danger: #e64a3b;
+      --radius-lg: 22px;
+      --radius-md: 14px;
+      --space-1: 6px;
+      --space-2: 10px;
+      --space-3: 14px;
+      --space-4: 18px;
+      --safe: env(safe-area-inset-bottom, 0px);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: radial-gradient(130% 80% at 0% 0%, #1e2432 0%, #111319 45%) fixed;
+      font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
-    .wrap { max-width: 640px; margin: 0 auto; padding: 16px 14px 40px; }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: var(--space-4) var(--space-3) calc(104px + var(--safe));
+    }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-      margin-bottom: 12px;
+      border-radius: var(--radius-lg);
+      padding: var(--space-3);
+      margin-bottom: var(--space-2);
+      box-shadow: none;
     }
-    .title { margin: 0 0 8px; font-size: 18px; }
-    .muted { color: var(--muted); }
-    .row { display: flex; gap: 8px; }
-    .row > * { flex: 1; }
-    .btn {
+    .status { color: var(--muted); font-size: 13px; margin-bottom: var(--space-1); min-height: 18px; }
+
+    .profile-layout {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: var(--space-3);
+      align-items: start;
+      margin-bottom: var(--space-1);
+    }
+    .profile-left {
+      display: grid;
+      justify-items: center;
+      gap: var(--space-1);
+    }
+    .profile-right {
+      display: grid;
+      gap: var(--space-2);
+      min-width: 0;
+    }
+    .avatar-wrap {
+      width: 136px;
+      height: 136px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,.14);
+      box-shadow: none;
+      background: #2a3a4d;
+      position: relative;
+    }
+    .avatar-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+    .avatar-fallback {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 52px;
+      font-weight: 700;
+      color: #d5e6ff;
+      letter-spacing: -0.03em;
+    }
+    .name {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-top: 0;
+      text-align: center;
+      color: var(--muted);
+    }
+    .chips {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: var(--space-2);
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #31465d;
+      color: #fff;
+      font-size: 24px;
+      border: 2px solid rgba(255,255,255,.18);
+      box-shadow: none;
+      position: relative;
+      z-index: 1;
+      transition: transform .14s ease;
+    }
+
+    .bubble {
+      width: 100%;
+      background: var(--blue);
+      color: #fff;
+      border-radius: 16px;
+      padding: 12px 13px;
+      line-height: 1.4;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+      position: relative;
+      box-shadow: none;
+      white-space: pre-wrap;
+    }
+    .summary-notes {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    .copy-btn {
+      margin-top: var(--space-2);
+      width: 100%;
       border: 0;
       border-radius: 12px;
-      padding: 12px;
-      color: #fff;
-      background: #2d3447;
-      font-size: 15px;
+      padding: 11px 12px;
+      font-size: 14px;
+      font-weight: 600;
+      background: rgba(51,144,236,.2);
+      color: #8bc4ff;
       cursor: pointer;
+      transition: background-color .14s ease, transform .14s ease;
     }
-    .btn.accent { background: var(--accent); color: #111; font-weight: 600; }
-    .btn:disabled { opacity: .6; cursor: default; }
-    input, select {
+    .copy-btn:active { transform: scale(.99); }
+
+    .form-note { color: var(--muted); margin-bottom: var(--space-1); font-size: 13px; }
+    .answer-target-title {
+      margin: 8px 0 10px;
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 560;
+      min-height: 20px;
+    }
+    input, select, button.primary {
       width: 100%;
-      background: #121723;
+      margin-bottom: var(--space-1);
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 12px;
+    }
+    input:focus { outline: none; border-color: rgba(10,132,255,.5); box-shadow: 0 0 0 4px rgba(10,132,255,.12); }
+    button.primary {
+      background: var(--blue);
       color: #fff;
-      border: 1px solid #2d3447;
-      border-radius: 10px;
-      padding: 10px 11px;
-      margin-top: 8px;
-      margin-bottom: 8px;
-      font-size: 15px;
+      border: none;
+      font-weight: 600;
+      box-shadow: none;
+      cursor: pointer;
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    button.primary:active { transform: scale(.99); }
+    .choice-group {
+      margin: 10px 0 6px;
+      opacity: 0;
+      max-height: 0;
+      overflow: hidden;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity .24s ease, transform .24s ease, max-height .28s ease;
+    }
+    .choice-group.visible {
+      opacity: 1;
+      max-height: 180px;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .choice-title {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: var(--space-1);
+      text-transform: lowercase;
+    }
+    .choice-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-1);
+    }
+    .choice-btn {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      border-radius: 11px;
+      padding: 8px 9px;
+      cursor: pointer;
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.25;
+      min-height: 56px;
+      transition: background-color .14s ease, border-color .14s ease, transform .14s ease;
+    }
+    .choice-btn .em { display: block; font-size: 20px; margin-bottom: 2px; }
+    .choice-btn.active {
+      border-color: rgba(51,144,236,.6);
+      background: rgba(51,144,236,.22);
+    }
+    .choice-btn:active { transform: scale(.99); }
+    .status-line { color: var(--muted); min-height: 20px; }
+    .suggestions {
+      margin-top: var(--space-1);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-1);
+    }
+    .suggestions .item {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background-color .14s ease, border-color .14s ease;
+    }
+    .suggestions .item:hover {
+      border-color: rgba(51,144,236,.5);
+      background: rgba(51,144,236,.16);
     }
     pre {
+      margin: var(--space-2) 0 0;
       white-space: pre-wrap;
-      word-break: break-word;
-      margin: 0;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 11px;
       line-height: 1.4;
-      color: #f8f9ff;
+      font-size: 14px;
     }
-    .status { margin-top: 8px; color: var(--muted); min-height: 20px; }
+
+    .bottom-nav {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: var(--space-2);
+      width: min(760px, calc(100% - 18px));
+      padding: var(--space-1);
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(35, 46, 60, .96);
+      box-shadow: none;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-1);
+    }
+    .tab-btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 8px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 580;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background-color .14s ease, color .14s ease;
+    }
+    .tab-btn.active {
+      background: rgba(51,144,236,.2);
+      color: #8bc4ff;
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(88px + var(--safe));
+      transform: translateX(-50%) translateY(10px);
+      width: min(740px, calc(100% - 24px));
+      background: rgba(24, 35, 50, .96);
+      color: #dfefff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      line-height: 1.35;
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: .22s ease;
+      box-shadow: none;
+      z-index: 50;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    @media (max-width: 560px) {
+      .wrap { padding: 12px 10px calc(98px + var(--safe)); }
+      .profile-layout { grid-template-columns: 1fr; gap: var(--space-2); }
+      .profile-left { justify-items: start; }
+      .avatar-wrap { width: 112px; height: 112px; }
+      .name { text-align: left; font-size: 14px; }
+      .chips { gap: 8px; }
+      .chip { width: 48px; height: 48px; font-size: 22px; }
+      .bubble { font-size: 14px; }
+    }
   </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <h1 class="title">GetXposed Mini App</h1>
-    <div class="row">
-      <button id="tabProfile" class="btn accent">👀 Профиль</button>
-      <button id="tabAnswer" class="btn">✍️ Ответ</button>
-      <button id="tabInsight" class="btn">🧭 Узнать</button>
-    </div>
-    <div class="status" id="authStatus">Проверка Telegram сессии...</div>
-  </div>
-
   <section id="profileBlock" class="card">
-    <pre id="profileText">Загрузка...</pre>
+    <div id="authStatus" class="status">Проверка Telegram сессии...</div>
+    <div class="profile-layout">
+      <div class="profile-left">
+        <div class="avatar-wrap">
+          <img id="avatarImg" alt="avatar">
+          <div id="avatarFallback" class="avatar-fallback">U</div>
+        </div>
+        <div id="profileName" class="name">@username</div>
+      </div>
+      <div class="profile-right">
+        <div class="chips">
+          <div id="chipTone" class="chip">🙂</div>
+          <div id="chipSpeed" class="chip">🐢</div>
+          <div id="chipFormat" class="chip">💬</div>
+        </div>
+        <div id="summaryBubble" class="bubble">Загрузка...</div>
+        <div id="summaryNotes" class="summary-notes"></div>
+      </div>
+    </div>
+    <button id="copyLink" class="copy-btn">Поделиться</button>
+    <code id="profileLink" style="display:none;">—</code>
   </section>
 
   <section id="answerBlock" class="card" style="display:none;">
-    <div class="muted">Оставь ответ о человеке</div>
-    <input id="target" placeholder="@username">
-    <select id="tone">
-      <option value="easy">😄 Легко, с юмора</option>
-      <option value="serious">🧠 Спокойно, по делу</option>
-    </select>
-    <select id="speed">
-      <option value="fast">🔥 Можно сразу</option>
-      <option value="slow">🐢 Лучше постепенно</option>
-    </select>
-    <select id="contactFormat">
-      <option value="text">💬 Переписка</option>
-      <option value="live">🎤 Живое общение</option>
-    </select>
-    <select id="caution">
-      <option value="false">👍 Нет</option>
-      <option value="true">🚩 Да</option>
-    </select>
-    <button id="sendAnswer" class="btn accent">Отправить</button>
-    <div class="status" id="answerStatus"></div>
+    <div class="form-note">Оставь ответ о человеке</div>
+    <input id="target" list="userSuggestions" placeholder="@username">
+    <datalist id="userSuggestions"></datalist>
+    <div class="form-note">Начни вводить username — подтянем из Telegram-базы бота</div>
+    <div id="answerTargetTitle" class="answer-target-title"></div>
+    <div class="choice-group" data-step="0">
+      <div class="choice-title">с чего начать разговор лучше</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="tone" data-value="easy">
+          <span class="em">😄</span>легко, с юмора
+        </button>
+        <button class="choice-btn" type="button" data-field="tone" data-value="serious">
+          <span class="em">🧠</span>спокойно, по делу
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="1">
+      <div class="choice-title">насколько быстро заходить в контакт</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="speed" data-value="fast">
+          <span class="em">🔥</span>можно сразу
+        </button>
+        <button class="choice-btn" type="button" data-field="speed" data-value="slow">
+          <span class="em">🐢</span>лучше постепенно
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="2">
+      <div class="choice-title">где общение зайдёт лучше</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="contact_format" data-value="text">
+          <span class="em">💬</span>переписка
+        </button>
+        <button class="choice-btn" type="button" data-field="contact_format" data-value="live">
+          <span class="em">🎤</span>живое общение
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="3">
+      <div class="choice-title">есть ли что-то, где лучше аккуратнее</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="caution" data-value="false">
+          <span class="em">👍</span>нет
+        </button>
+        <button class="choice-btn" type="button" data-field="caution" data-value="true">
+          <span class="em">🚩</span>да
+        </button>
+      </div>
+    </div>
+    <button id="sendAnswer" class="primary" style="display:none;">Отправить</button>
+    <div id="answerStatus" class="status-line"></div>
   </section>
 
   <section id="insightBlock" class="card" style="display:none;">
-    <div class="muted">Узнать, как лучше начать контакт</div>
+    <div class="form-note">Узнать, как лучше начать контакт</div>
     <input id="insightTarget" placeholder="@username">
-    <button id="getInsight" class="btn accent">Показать</button>
-    <pre id="insightText" style="margin-top:10px;"></pre>
+    <div class="form-note">Нажми Enter — откроем профиль этого человека</div>
+    <div class="form-note">Люди, о которых ты уже оставлял ответы или недавно смотрел:</div>
+    <div id="insightSuggestions" class="suggestions"></div>
   </section>
 </div>
+
+<nav class="bottom-nav">
+  <button id="tabProfile" class="tab-btn active">👤 профиль</button>
+  <button id="tabAnswer" class="tab-btn">✍️ ответ</button>
+  <button id="tabInsight" class="tab-btn">👀 узнать</button>
+</nav>
+<div id="copyToast" class="toast"></div>
 
 <script src="/static/miniapp.js"></script>
 </body>
