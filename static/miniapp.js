@@ -1,7 +1,8 @@
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   const initData = tg ? tg.initData || "" : "";
-  const previewMode = new URLSearchParams(window.location.search).get("preview") === "1";
+  const urlParams = new URLSearchParams(window.location.search);
+  const previewMode = urlParams.get("preview") === "1";
 
   const authStatus = document.getElementById("authStatus");
   const profileLink = document.getElementById("profileLink");
@@ -40,6 +41,9 @@
   };
   let showingForeignProfile = false;
   let ownProfileLink = "";
+  let inviteLink = "";
+  let foreignProfileIsAppUser = true;
+  let foreignProfileUsername = "";
   let answerFlowTarget = "";
   let answerFlowStep = -1;
   const ANSWER_FIELDS = ["tone", "speed", "contact_format", "caution"];
@@ -65,12 +69,20 @@
 
   function updateShareState() {
     if (!copyLink) return;
-    if (showingForeignProfile) {
+    if (showingForeignProfile && foreignProfileIsAppUser) {
       copyLink.disabled = true;
       copyLink.textContent = "Поделиться";
       copyLink.title = "Можно делиться только своим профилем";
+      return;
+    }
+    if (showingForeignProfile && !foreignProfileIsAppUser) {
+      copyLink.disabled = false;
+      copyLink.textContent = "Пригласить";
+      copyLink.title = "";
+      return;
     } else {
       copyLink.disabled = false;
+      copyLink.textContent = "Поделиться";
       copyLink.title = "";
     }
   }
@@ -210,6 +222,7 @@
 
   function renderProfile(d) {
     profileLink.textContent = d.link || "—";
+    inviteLink = d.invite_link || inviteLink;
 
     setAvatar(d.user || {});
     summaryBubble.textContent = buildSummaryText(d);
@@ -236,6 +249,8 @@
       const resp = await api(endpoint);
       renderProfile(resp.data);
       showingForeignProfile = false;
+      foreignProfileIsAppUser = true;
+      foreignProfileUsername = "";
       ownProfileLink = (resp.data && resp.data.link) || ownProfileLink;
       updateShareState();
       authStatus.textContent = "";
@@ -261,12 +276,16 @@
         };
         data.target = normalized;
         data.link = "https://t.me/getxposedbot?start=ref_" + normalized.replace("@", "");
+        data.is_app_user = false;
         renderProfile(data);
+        foreignProfileIsAppUser = false;
       } else {
         const resp = await api("/api/miniapp/profile?target=" + encodeURIComponent(normalized));
         renderProfile(resp.data);
+        foreignProfileIsAppUser = !!resp.data.is_app_user;
       }
       showingForeignProfile = true;
+      foreignProfileUsername = normalized;
       updateShareState();
       authStatus.textContent = "Профиль " + normalized;
       setForeignProfileView();
@@ -486,12 +505,16 @@
 
   copyLink.addEventListener("click", async function () {
     if (showingForeignProfile) {
-      showCopyToast("Можно делиться только своей ссылкой.");
-      return;
+      if (foreignProfileIsAppUser) {
+        showCopyToast("Можно делиться только своей ссылкой.");
+        return;
+      }
     }
-    const text = ownProfileLink || profileLink.textContent || "";
+    const text = showingForeignProfile ? inviteLink : (ownProfileLink || profileLink.textContent || "");
     if (!text || text === "—") return;
-    const shareText = "Предложить оценить меня анонимно";
+    const shareText = showingForeignProfile
+      ? ("Приглашаю @" + foreignProfileUsername.replace(/^@/, "") + " в приложение")
+      : "Предложить оценить меня анонимно";
     const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(text) + "&text=" + encodeURIComponent(shareText);
     try {
       if (tg && typeof tg.openTelegramLink === "function") {
@@ -530,7 +553,17 @@
       document.documentElement.style.setProperty("--blue", tg.themeParams.button_color);
     }
   }
-  loadInsightSuggestions();
-  loadProfile();
-  resetAnswerFlow();
+  async function initApp() {
+    loadInsightSuggestions();
+    await loadProfile();
+    resetAnswerFlow();
+    const rateTarget = normalizeName(urlParams.get("rate") || "");
+    if (rateTarget) {
+      setTab("answer");
+      targetInput.value = rateTarget;
+      await startAnswerFlow(rateTarget);
+    }
+  }
+
+  initApp();
 })();

@@ -55,6 +55,7 @@ def init_db() -> bool:
                             first_name TEXT DEFAULT '',
                             last_name TEXT DEFAULT '',
                             photo_url TEXT DEFAULT '',
+                            app_user BOOLEAN DEFAULT TRUE,
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
@@ -62,6 +63,7 @@ def init_db() -> bool:
                     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''")
                     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''")
                     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT DEFAULT ''")
+                    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS app_user BOOLEAN DEFAULT TRUE")
                     cur.execute(
                         """
                         CREATE TABLE IF NOT EXISTS ref_visits (
@@ -144,6 +146,7 @@ def init_db() -> bool:
                     first_name TEXT DEFAULT '',
                     last_name TEXT DEFAULT '',
                     photo_url TEXT DEFAULT '',
+                    app_user INTEGER DEFAULT 1,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -158,6 +161,10 @@ def init_db() -> bool:
                 pass
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN photo_url TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN app_user INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
                 pass
             conn.execute(
@@ -367,6 +374,7 @@ def upsert_user_with_flag(
     first_name: str = "",
     last_name: str = "",
     photo_url: str = "",
+    app_user: bool = True,
 ) -> bool:
     username = username.lower()
     if USE_POSTGRES:
@@ -382,16 +390,17 @@ def upsert_user_with_flag(
                     )
                     cur.execute(
                         """
-                        INSERT INTO users (user_id, username, first_name, last_name, photo_url, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO users (user_id, username, first_name, last_name, photo_url, app_user, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT(user_id) DO UPDATE SET
                             username = EXCLUDED.username,
                             first_name = EXCLUDED.first_name,
                             last_name = EXCLUDED.last_name,
                             photo_url = EXCLUDED.photo_url,
+                            app_user = users.app_user OR EXCLUDED.app_user,
                             updated_at = CURRENT_TIMESTAMP
                         """,
-                        (user_id, username, first_name, last_name, photo_url),
+                        (user_id, username, first_name, last_name, photo_url, app_user),
                     )
                     conn.commit()
                     return not existed
@@ -412,16 +421,20 @@ def upsert_user_with_flag(
                 )
                 conn.execute(
                     """
-                    INSERT INTO users (user_id, username, first_name, last_name, photo_url, updated_at)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO users (user_id, username, first_name, last_name, photo_url, app_user, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(user_id) DO UPDATE SET
                         username = excluded.username,
                         first_name = excluded.first_name,
                         last_name = excluded.last_name,
                         photo_url = excluded.photo_url,
+                        app_user = CASE
+                            WHEN users.app_user = 1 OR excluded.app_user = 1 THEN 1
+                            ELSE 0
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (user_id, username, first_name, last_name, photo_url),
+                    (user_id, username, first_name, last_name, photo_url, 1 if app_user else 0),
                 )
                 return not existed
         finally:
@@ -434,8 +447,9 @@ def upsert_user(
     first_name: str = "",
     last_name: str = "",
     photo_url: str = "",
+    app_user: bool = True,
 ) -> None:
-    upsert_user_with_flag(user_id, username, first_name, last_name, photo_url)
+    upsert_user_with_flag(user_id, username, first_name, last_name, photo_url, app_user)
 
 
 def get_user_public_by_username(username: str) -> Optional[dict]:
@@ -446,7 +460,7 @@ def get_user_public_by_username(username: str) -> Optional[dict]:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT user_id, username, first_name, last_name, photo_url
+                        SELECT user_id, username, first_name, last_name, photo_url, app_user
                         FROM users
                         WHERE LOWER(username) = LOWER(%s)
                         LIMIT 1
@@ -464,7 +478,7 @@ def get_user_public_by_username(username: str) -> Optional[dict]:
         try:
             cur = conn.execute(
                 """
-                SELECT user_id, username, first_name, last_name, photo_url
+                SELECT user_id, username, first_name, last_name, photo_url, app_user
                 FROM users
                 WHERE LOWER(username) = LOWER(?)
                 LIMIT 1
@@ -482,6 +496,7 @@ def get_user_public_by_username(username: str) -> Optional[dict]:
         "first_name": str(row[2] or ""),
         "last_name": str(row[3] or ""),
         "photo_url": str(row[4] or ""),
+        "app_user": bool(row[5]),
     }
 
 
@@ -578,7 +593,7 @@ def normalize_case_data() -> tuple[int, int]:
     return users_merged, rows_lowercased
 
 
-def add_ref_visit(target: str, visitor_id: int) -> None:
+def add_ref_visit(target: str, visitor_id: int) -> bool:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
@@ -588,19 +603,23 @@ def add_ref_visit(target: str, visitor_id: int) -> None:
                         "INSERT INTO ref_visits (target, visitor_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (target, visitor_id),
                     )
+                    inserted = cur.rowcount > 0
                     conn.commit()
+                    return inserted
             finally:
                 conn.close()
         except Exception as exc:
             logging.warning("DB add_ref_visit failed: %s", exc)
+            return False
     else:
         conn = _get_sqlite_conn()
         try:
             with conn:
-                conn.execute(
+                cur = conn.execute(
                     "INSERT OR IGNORE INTO ref_visits (target, visitor_id) VALUES (?, ?)",
                     (target, visitor_id),
                 )
+                return (cur.rowcount or 0) > 0
         finally:
             conn.close()
 

@@ -8,7 +8,7 @@ import os
 import random
 import re
 import time
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router, types
@@ -109,6 +109,8 @@ def api_miniapp_me():
     payload = build_profile_payload(target)
     bot_username = get_bot_public_username()
     payload["link"] = f"https://t.me/{bot_username}?start=ref_{username}"
+    payload["invite_link"] = f"https://t.me/{bot_username}"
+    payload["is_app_user"] = True
     stored_user = db.get_user_public_by_username(target) or {}
     payload["user"] = {
         "id": int(stored_user.get("id") or user_id),
@@ -144,6 +146,8 @@ def api_miniapp_preview():
                 "caution_block": True,
                 "uncertain_block": True,
                 "link": f"https://t.me/{get_bot_public_username()}?start=ref_preview_user",
+                "invite_link": f"https://t.me/{get_bot_public_username()}",
+                "is_app_user": True,
                 "user": {
                     "id": 1,
                     "username": "preview_user",
@@ -169,6 +173,7 @@ def api_miniapp_profile():
         return jsonify({"ok": False, "error": "Нужен корректный @username"}), 400
 
     user_payload = db.get_user_public_by_username(target)
+    target_is_app_user = bool(user_payload and user_payload.get("app_user"))
     # If profile data isn't in DB yet, try resolving basic public user info from Telegram.
     if (not user_payload or (not user_payload.get("first_name") and not user_payload.get("last_name"))) and APP_LOOP and APP_BOT:
         try:
@@ -185,19 +190,24 @@ def api_miniapp_profile():
                 str(resolved.get("first_name") or ""),
                 str(resolved.get("last_name") or ""),
                 str(resolved.get("photo_url") or ""),
+                False,
             )
             user_payload = db.get_user_public_by_username(target)
 
     payload = build_profile_payload(target)
-    payload["link"] = f"https://t.me/{get_bot_public_username()}?start=ref_{target.lstrip('@')}"
+    bot_username = get_bot_public_username()
+    payload["link"] = f"https://t.me/{bot_username}?start=ref_{target.lstrip('@')}"
+    payload["invite_link"] = f"https://t.me/{bot_username}"
     payload["user"] = user_payload or {
         "id": 0,
         "username": target.lstrip("@"),
         "first_name": "",
         "last_name": "",
         "photo_url": "",
+        "app_user": False,
     }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
+    payload["is_app_user"] = bool(payload["user"].get("app_user") or target_is_app_user)
     return jsonify({"ok": True, "data": payload})
 
 
@@ -374,11 +384,25 @@ def api_miniapp_preview_feedback():
     return jsonify({"ok": True, "result": "inserted", "message": "Готово 👍 (preview)"})
 
 
-def build_launch_kb() -> Optional[types.InlineKeyboardMarkup]:
+def with_rate_param(url: str, target: Optional[str]) -> str:
+    if not target:
+        return url
+    uname = target.lstrip("@").lower()
+    if not uname:
+        return url
+    parts = urlsplit(url)
+    pairs = list(parse_qsl(parts.query, keep_blank_values=True))
+    pairs = [(k, v) for (k, v) in pairs if k != "rate"]
+    pairs.append(("rate", uname))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
+
+
+def build_launch_kb(prefill_target: Optional[str] = None) -> Optional[types.InlineKeyboardMarkup]:
     if not MINI_APP_URL:
         return None
+    app_url = with_rate_param(MINI_APP_URL, prefill_target)
     kb = InlineKeyboardBuilder()
-    kb.button(text="Открыть приложение", web_app=types.WebAppInfo(url=MINI_APP_URL))
+    kb.button(text="Открыть приложение", web_app=types.WebAppInfo(url=app_url))
     return kb.as_markup()
 
 
@@ -752,13 +776,26 @@ async def validate_feedback_target(bot: Bot, target: str) -> tuple[bool, Optiona
 async def cmd_start(message: types.Message, command: CommandObject):
     register_user(message)
     payload = command.args or ""
+    ref_target: Optional[str] = None
     if payload.startswith("ref_") and message.from_user and message.from_user.id:
         raw = payload[4:]
         target = normalize_username(f"@{raw}") if not raw.startswith("@") else normalize_username(raw)
         if target:
-            await db_call(db.add_ref_visit, target, message.from_user.id)
+            ref_target = target
+            inserted = await db_call(db.add_ref_visit, target, message.from_user.id)
+            if inserted and APP_BOT:
+                owner = await db_call(db.get_user_public_by_username, target)
+                target_user_id = int(owner.get("id") or 0) if owner else 0
+                if target_user_id and target_user_id != message.from_user.id:
+                    queue_coroutine(
+                        send_tracked_push(
+                            APP_BOT,
+                            target_user_id,
+                            "🔥 похоже, ты запустил небольшую цепную реакцию.\n\nпо твоей ссылке пришёл новый человек 👀",
+                        )
+                    )
 
-    launch_kb = build_launch_kb()
+    launch_kb = build_launch_kb(ref_target)
     if launch_kb:
         await message.answer("Открой приложение и оставь анонимный ответ 👇", reply_markup=launch_kb)
     else:
