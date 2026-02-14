@@ -204,7 +204,7 @@ def add_vote(
 
                     cur.execute(
                         """
-                        SELECT id, created_at
+                        SELECT id, created_at, label
                         FROM votes
                         WHERE target = %s AND voter_id = %s
                         ORDER BY id DESC
@@ -223,6 +223,24 @@ def add_vote(
 
                     vote_id = int(row[0])
                     last_ts = row[1]
+                    old_label = str(row[2]) if row[2] is not None else ""
+                    if old_label != "feedback":
+                        cur.execute(
+                            """
+                            UPDATE votes
+                            SET label = %s,
+                                tone = %s,
+                                speed = %s,
+                                contact_format = %s,
+                                caution = %s,
+                                created_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            ("feedback", tone, speed, contact_format, caution, vote_id),
+                        )
+                        conn.commit()
+                        return "inserted"
+
                     if isinstance(last_ts, datetime) and datetime.utcnow() - last_ts.replace(tzinfo=None) >= cooldown:
                         cur.execute(
                             """
@@ -259,7 +277,7 @@ def add_vote(
 
                 cur = conn.execute(
                     """
-                    SELECT id, created_at
+                    SELECT id, created_at, label
                     FROM votes
                     WHERE target = ? AND voter_id = ?
                     ORDER BY id DESC
@@ -277,6 +295,23 @@ def add_vote(
 
                 vote_id = int(row[0])
                 ts_raw = row[1]
+                old_label = str(row[2]) if row[2] is not None else ""
+                if old_label != "feedback":
+                    conn.execute(
+                        """
+                        UPDATE votes
+                        SET label = ?,
+                            tone = ?,
+                            speed = ?,
+                            contact_format = ?,
+                            caution = ?,
+                            created_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        ("feedback", tone, speed, contact_format, caution, vote_id),
+                    )
+                    return "inserted"
+
                 try:
                     last_ts = datetime.fromisoformat(str(ts_raw))
                 except ValueError:
