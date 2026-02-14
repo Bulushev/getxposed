@@ -34,11 +34,19 @@ def init_db() -> bool:
                             id SERIAL PRIMARY KEY,
                             target TEXT NOT NULL,
                             label TEXT NOT NULL,
+                            tone TEXT DEFAULT 'serious',
+                            speed TEXT DEFAULT 'slow',
+                            contact_format TEXT DEFAULT 'text',
+                            caution TEXT DEFAULT 'false',
                             voter_id BIGINT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
                     )
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS tone TEXT DEFAULT 'serious'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS speed TEXT DEFAULT 'slow'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS contact_format TEXT DEFAULT 'text'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS caution TEXT DEFAULT 'false'")
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS users (
@@ -93,15 +101,35 @@ def init_db() -> bool:
         try:
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS votes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    target TEXT NOT NULL,
-                    label TEXT NOT NULL,
-                    voter_id INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    CREATE TABLE IF NOT EXISTS votes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        target TEXT NOT NULL,
+                        label TEXT NOT NULL,
+                        tone TEXT DEFAULT 'serious',
+                        speed TEXT DEFAULT 'slow',
+                        contact_format TEXT DEFAULT 'text',
+                        caution TEXT DEFAULT 'false',
+                        voter_id INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
                 )
-                """
-            )
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN tone TEXT DEFAULT 'serious'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN speed TEXT DEFAULT 'slow'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN contact_format TEXT DEFAULT 'text'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN caution TEXT DEFAULT 'false'")
+            except sqlite3.OperationalError:
+                pass
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -150,15 +178,23 @@ def init_db() -> bool:
         return True
 
 
-def add_vote(target: str, label: str, voter_id: Optional[int]) -> Optional[bool]:
+def add_vote(
+    target: str,
+    label: str,
+    voter_id: Optional[int],
+    tone: str = "serious",
+    speed: str = "slow",
+    contact_format: str = "text",
+    caution: str = "false",
+) -> Optional[bool]:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "INSERT INTO votes (target, label, voter_id) VALUES (%s, %s, %s)",
-                        (target, label, voter_id),
+                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (target, label, tone, speed, contact_format, caution, voter_id),
                     )
                     conn.commit()
                 return True
@@ -175,8 +211,8 @@ def add_vote(target: str, label: str, voter_id: Optional[int]) -> Optional[bool]
         try:
             with conn:
                 conn.execute(
-                    "INSERT INTO votes (target, label, voter_id) VALUES (?, ?, ?)",
-                    (target, label, voter_id),
+                    "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (target, label, tone, speed, contact_format, caution, voter_id),
                 )
             return True
         except sqlite3.IntegrityError:
@@ -599,3 +635,48 @@ def list_users(limit: int = 100) -> List[str]:
         finally:
             conn.close()
     return [row[0] for row in rows]
+
+
+def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
+    fields = {
+        "tone": ("easy", "serious"),
+        "speed": ("fast", "slow"),
+        "contact_format": ("text", "live"),
+    }
+    result: dict[str, dict[str, int]] = {
+        key: {option: 0 for option in options} for key, options in fields.items()
+    }
+
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    for field, options in fields.items():
+                        cur.execute(
+                            f"SELECT {field}, COUNT(*) FROM votes WHERE target = %s GROUP BY {field}",
+                            (target,),
+                        )
+                        for value, cnt in cur.fetchall():
+                            if value in options:
+                                result[field][str(value)] = int(cnt)
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB get_contact_dimensions failed: %s", exc)
+            return result
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            for field, options in fields.items():
+                cur = conn.execute(
+                    f"SELECT {field}, COUNT(*) FROM votes WHERE target = ? GROUP BY {field}",
+                    (target,),
+                )
+                for value, cnt in cur.fetchall():
+                    if value in options:
+                        result[field][str(value)] = int(cnt)
+        finally:
+            conn.close()
+
+    return result

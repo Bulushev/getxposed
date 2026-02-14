@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import random
 import re
 from urllib.parse import quote_plus
 from typing import Optional
@@ -50,6 +51,11 @@ NOTIFY_TEXTS = {
     "😈 опасный": "😈 с тобой явно не всё так просто.\nи кто-то это уже понял.",
     "🚩 ред флаг": "🚩 похоже, рядом с тобой у кого-то включается режим \"осторожно\".",
 }
+NEW_ANSWER_HINTS = [
+    "👀 Появился новый взгляд",
+    "⚡ Картина стала чуть точнее",
+    "🔍 Кто-то помог уточнить первый шаг",
+]
 
 
 def normalize_username(raw: str) -> Optional[str]:
@@ -60,12 +66,64 @@ def normalize_username(raw: str) -> Optional[str]:
     return f"@{m.group(1)}"
 
 
-def build_rating_kb(target: str) -> types.InlineKeyboardMarkup:
+def build_rating_kb(
+    target: str,
+    tone: str,
+    speed: str,
+    contact_format: str,
+    caution: str,
+) -> types.InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for idx, label in enumerate(RATINGS):
-        kb.button(text=label, callback_data=f"rate|{idx}|{target}")
+        kb.button(
+            text=label,
+            callback_data=f"rate|{idx}|{target}|{tone}|{speed}|{contact_format}|{caution}",
+        )
     kb.adjust(2, 2, 2)
     return kb.as_markup()
+
+
+def build_tone_kb(target: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="😄 Легко, с юмора", callback_data=f"tone|easy|{target}")
+    kb.button(text="🧠 Спокойно, по делу", callback_data=f"tone|serious|{target}")
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
+
+def build_speed_kb(target: str, tone: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔥 Можно сразу", callback_data=f"speed|fast|{target}|{tone}")
+    kb.button(text="🐢 Лучше постепенно", callback_data=f"speed|slow|{target}|{tone}")
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
+
+def build_format_kb(target: str, tone: str, speed: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Переписка", callback_data=f"format|text|{target}|{tone}|{speed}")
+    kb.button(text="🎤 Живое общение", callback_data=f"format|live|{target}|{tone}|{speed}")
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
+
+def build_caution_kb(target: str, tone: str, speed: str, contact_format: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚩 Да", callback_data=f"caution|true|{target}|{tone}|{speed}|{contact_format}")
+    kb.button(text="👍 Нет", callback_data=f"caution|false|{target}|{tone}|{speed}|{contact_format}")
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
+
+def pick_recommendation(dimensions: dict[str, dict[str, int]]) -> tuple[str, str, str]:
+    tone_counts = dimensions.get("tone", {})
+    speed_counts = dimensions.get("speed", {})
+    format_counts = dimensions.get("contact_format", {})
+
+    tone_pick = "easy" if tone_counts.get("easy", 0) >= tone_counts.get("serious", 0) else "serious"
+    speed_pick = "slow" if speed_counts.get("slow", 0) >= speed_counts.get("fast", 0) else "fast"
+    format_pick = "text" if format_counts.get("text", 0) >= format_counts.get("live", 0) else "live"
+    return tone_pick, speed_pick, format_pick
 
 
 @health_app.get("/health")
@@ -75,8 +133,16 @@ def health() -> tuple[str, int]:
 
 def build_main_kb() -> types.ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
-    kb.button(text="мой профиль")
-    kb.button(text="дать коммент")
+    kb.button(text="👀 Посмотреть себя")
+    kb.button(text="✍️ Ответить про человека")
+    kb.adjust(2)
+    return kb.as_markup(resize_keyboard=True)
+
+
+def build_after_rate_kb() -> types.ReplyKeyboardMarkup:
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="👀 Посмотреть про себя")
+    kb.button(text="➕ Ответить ещё про кого-то")
     kb.adjust(2)
     return kb.as_markup(resize_keyboard=True)
 
@@ -85,10 +151,8 @@ def build_share_kb(link: str) -> types.InlineKeyboardMarkup:
     share_text = "нука интересно как меня оценишь"
     share_url = f"https://t.me/share/url?url={quote_plus(link)}&text={quote_plus(share_text)}"
     kb = InlineKeyboardBuilder()
-    kb.button(text="Поделиться", url=share_url)
+    kb.button(text="🔗 Поделиться ссылкой", url=share_url)
     return kb.as_markup()
-
-
 
 def register_user(message: types.Message) -> None:
     if message.from_user and message.from_user.id and message.from_user.username:
@@ -96,7 +160,7 @@ def register_user(message: types.Message) -> None:
 
 
 @router.message(CommandStart())
-async def cmd_start(message: types.Message, bot: Bot, command: CommandObject):
+async def cmd_start(message: types.Message, command: CommandObject):
     register_user(message)
     payload = command.args
     if payload and payload.startswith("ref_"):
@@ -106,17 +170,17 @@ async def cmd_start(message: types.Message, bot: Bot, command: CommandObject):
             if message.from_user and message.from_user.id:
                 db.add_ref_visit(target, message.from_user.id)
             await message.answer(
-                f"Оцени пользователя {target}:",
-                reply_markup=build_rating_kb(target),
+                "Как бы ты начал разговор?",
+                reply_markup=build_tone_kb(target),
             )
             return
-    total = 0
-    if message.from_user and message.from_user.username:
-        total = db.get_total(f"@{message.from_user.username}")
     start_text = (
-        "похоже, кто-то уже заходил и присматривался к тебе"
-        if total == 0
-        else f"тебя уже оценили {total} человека, открой свой профиль"
+        "Иногда сложно понять,\n"
+        "как лучше начать разговор.\n\n"
+        "Этот бот — про это.\n\n"
+        "Кнопки:\n\n"
+        "👀 Посмотреть себя\n\n"
+        "✍️ Ответить про человека"
     )
     await message.answer(
         start_text,
@@ -239,7 +303,7 @@ async def on_text(message: types.Message):
             WAITING_FOR_USERNAME.discard(message.from_user.id)
         return
     lowered = text.lower()
-    if lowered == "мой профиль":
+    if lowered in ("мой профиль", "👀 посмотреть себя", "👀 посмотреть про себя"):
         if not message.from_user or not message.from_user.username:
             await message.answer("Нужен @username в профиле Telegram", reply_markup=build_main_kb())
             return
@@ -256,9 +320,7 @@ async def on_text(message: types.Message):
         counts = {label: 0 for label in RATINGS}
         for label, cnt in rows:
             counts[label] = cnt
-        top_label = None
-        if total > 0:
-            top_label = max(counts.items(), key=lambda x: x[1])[0]
+        dimensions = db.get_contact_dimensions(target)
 
         lines = [
             "твоя ссылка 👇",
@@ -275,44 +337,96 @@ async def on_text(message: types.Message):
         ]
         if total < 3:
             lines += [
-                "👀 тебе уже что-то написали…",
-                "покажем, когда станет чуть больше.",
+                "Похоже, кто-то уже отвечал.",
+                "",
+                "Нужно ещё пару ответов,",
+                "чтобы собрать понятную картину.",
             ]
         else:
+            tone_counts = dimensions["tone"]
+            speed_counts = dimensions["speed"]
+            format_counts = dimensions["contact_format"]
+
+            tone_pick = "easy" if tone_counts["easy"] >= tone_counts["serious"] else "serious"
+            speed_pick = "slow" if speed_counts["slow"] >= speed_counts["fast"] else "fast"
+            format_pick = "text" if format_counts["text"] >= format_counts["live"] else "live"
+
+            tone_text = "👉 лёгкий заход, с юмора" if tone_pick == "easy" else "👉 спокойно и по делу"
+            speed_text = "👉 лучше не торопиться" if speed_pick == "slow" else "👉 можно сразу"
+            format_text = "👉 начать с переписки" if format_pick == "text" else "👉 лучше в живом общении"
+
             lines += [
-                "чаще всего тебя видят как:",
-                f"{top_label}" if top_label else "пока без меток",
+                "Как с тобой чаще всего",
+                "начинают контакт:",
                 "",
-                "метки:",
+                tone_text,
+                speed_text,
+                format_text,
+                "",
+                "— — —",
             ]
+
+            redflag_ratio = counts.get("🚩 ред флаг", 0) / total if total > 0 else 0
+            if redflag_ratio >= 0.3:
+                lines += [
+                    "",
+                    "⚠️ Иногда люди чувствуют напряжение.",
+                    "Лучше не давить и дать время.",
+                    "",
+                    "— — —",
+                ]
+
+            def is_uncertain(a: int, b: int) -> bool:
+                s = a + b
+                return s > 0 and max(a, b) / s < 0.6
+
+            uncertain = (
+                is_uncertain(tone_counts["easy"], tone_counts["serious"])
+                or is_uncertain(speed_counts["fast"], speed_counts["slow"])
+                or is_uncertain(format_counts["text"], format_counts["live"])
+            )
+            if uncertain:
+                lines += [
+                    "",
+                    "По этому пункту",
+                    "мнения разделились —",
+                    "лучше ориентироваться по ситуации.",
+                ]
+
+            lines += ["", "метки:"]
             for label in RATINGS:
                 if counts[label] > 0:
                     lines.append(f"{label} — {counts[label]}")
 
-            lines += [
-                "",
-                "— — —",
-                "",
-                "👀 тебя видят очень по-разному.",
-                "один из ответов явно выбивается…",
-                "",
-                "⚡ похоже, вокруг тебя начинается движ.",
-                "интересно, что будет на 20 просмотрах.",
-            ]
-
         text = "\n".join(lines)
+        reply_kb = build_after_rate_kb() if total < 3 else build_main_kb()
         await message.answer(
             text,
-            reply_markup=build_main_kb(),
+            reply_markup=reply_kb,
             parse_mode="Markdown",
             disable_web_page_preview=True,
         )
-        await message.answer("Поделиться ссылкой:", reply_markup=build_share_kb(link))
+        await message.answer(" ", reply_markup=build_share_kb(link))
+        if total < 3:
+            await message.answer(
+                "Лучше всего работает,\nесли скинуть в знакомый чат",
+                reply_markup=reply_kb,
+            )
         return
-    if lowered == "дать коммент":
+    if lowered in (
+        "дать коммент",
+        "✍️ ответить про человека",
+        "➕ ответить ещё про кого-то",
+    ):
         if message.from_user:
             WAITING_FOR_USERNAME.add(message.from_user.id)
-        await message.answer("Укажи @username, кому хочешь дать оценку.", reply_markup=build_main_kb())
+        await message.answer(
+            "Про кого отвечаем?\n"
+            "поле ввода @username\n\n"
+            "Это просто для ориентира,\n"
+            "никто не узнает, что это был ты",
+            reply_markup=build_main_kb(),
+        )
         return
     if message.from_user and message.from_user.id in WAITING_FOR_USERNAME:
         target = normalize_username(text)
@@ -321,26 +435,122 @@ async def on_text(message: types.Message):
             return
         WAITING_FOR_USERNAME.discard(message.from_user.id)
         await message.answer(
-            f"Оцени пользователя {target}:",
-            reply_markup=build_rating_kb(target),
+            "Как бы ты начал разговор?",
+            reply_markup=build_tone_kb(target),
         )
         return
     target = normalize_username(text)
     if not target:
         return
     await message.answer(
+        "Как бы ты начал разговор?",
+        reply_markup=build_tone_kb(target),
+    )
+
+
+@router.callback_query(F.data.startswith("tone|"))
+async def on_tone(callback: types.CallbackQuery):
+    parts = (callback.data or "").split("|", 2)
+    if len(parts) != 3:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    _, tone, target = parts
+    if tone not in {"easy", "serious"}:
+        await callback.answer("Некорректный формат", show_alert=True)
+        return
+
+    await callback.answer("Принято")
+    await callback.message.answer(
+        "Насколько можно быть прямым?",
+        reply_markup=build_speed_kb(target, tone),
+    )
+
+
+@router.callback_query(F.data.startswith("speed|"))
+async def on_speed(callback: types.CallbackQuery):
+    parts = (callback.data or "").split("|", 3)
+    if len(parts) != 4:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    _, speed, target, tone = parts
+    if speed not in {"fast", "slow"}:
+        await callback.answer("Некорректный формат", show_alert=True)
+        return
+    if tone not in {"easy", "serious"}:
+        tone = "serious"
+
+    await callback.answer("Принято")
+    await callback.message.answer(
+        "Где контакт зайдёт лучше?",
+        reply_markup=build_format_kb(target, tone, speed),
+    )
+
+
+@router.callback_query(F.data.startswith("format|"))
+async def on_format(callback: types.CallbackQuery):
+    parts = (callback.data or "").split("|", 4)
+    if len(parts) != 5:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    _, contact_format, target, tone, speed = parts
+    if contact_format not in {"text", "live"}:
+        await callback.answer("Некорректный формат", show_alert=True)
+        return
+    if tone not in {"easy", "serious"}:
+        tone = "serious"
+    if speed not in {"fast", "slow"}:
+        speed = "slow"
+
+    await callback.answer("Принято")
+    await callback.message.answer(
+        "Есть ли что-то,\nс чем стоит быть аккуратнее?",
+        reply_markup=build_caution_kb(target, tone, speed, contact_format),
+    )
+
+
+@router.callback_query(F.data.startswith("caution|"))
+async def on_caution(callback: types.CallbackQuery):
+    parts = (callback.data or "").split("|", 5)
+    if len(parts) != 6:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    _, caution, target, tone, speed, contact_format = parts
+    if caution not in {"true", "false"}:
+        await callback.answer("Некорректный формат", show_alert=True)
+        return
+    if tone not in {"easy", "serious"}:
+        tone = "serious"
+    if speed not in {"fast", "slow"}:
+        speed = "slow"
+    if contact_format not in {"text", "live"}:
+        contact_format = "text"
+
+    await callback.answer("Принято")
+    await callback.message.answer(
         f"Оцени пользователя {target}:",
-        reply_markup=build_rating_kb(target),
+        reply_markup=build_rating_kb(target, tone, speed, contact_format, caution),
     )
 
 
 @router.callback_query(F.data.startswith("rate|"))
 async def on_rate(callback: types.CallbackQuery):
-    parts = (callback.data or "").split("|", 2)
-    if len(parts) != 3:
+    parts = (callback.data or "").split("|", 6)
+    if len(parts) not in (3, 4, 5, 6, 7):
         await callback.answer("Некорректные данные", show_alert=True)
         return
-    _, idx_str, target = parts
+    _, idx_str, target = parts[:3]
+    tone = parts[3] if len(parts) == 4 else "serious"
+    speed = parts[4] if len(parts) == 5 else "slow"
+    contact_format = parts[5] if len(parts) == 6 else "text"
+    caution = parts[6] if len(parts) == 7 else "false"
+    if tone not in {"easy", "serious"}:
+        tone = "serious"
+    if speed not in {"fast", "slow"}:
+        speed = "slow"
+    if contact_format not in {"text", "live"}:
+        contact_format = "text"
+    if caution not in {"true", "false"}:
+        caution = "false"
     try:
         idx = int(idx_str)
         label = RATINGS[idx]
@@ -349,13 +559,15 @@ async def on_rate(callback: types.CallbackQuery):
         return
 
     before_total = db.get_total(target)
+    before_dimensions = db.get_contact_dimensions(target)
+    rec_before = pick_recommendation(before_dimensions)
     before_rows = db.get_stats(target)
     before_counts = {k: int(v) for k, v in before_rows}
     max_before = max(before_counts.values()) if before_counts else 0
     before_label_count = before_counts.get(label, 0)
 
     voter_id = callback.from_user.id if callback.from_user else None
-    ok = db.add_vote(target, label, voter_id)
+    ok = db.add_vote(target, label, voter_id, tone, speed, contact_format, caution)
     if ok is None:
         await callback.answer("База недоступна, попробуй позже", show_alert=True)
         return
@@ -376,8 +588,8 @@ async def on_rate(callback: types.CallbackQuery):
         return
     await callback.answer("Готово")
     await callback.message.answer(
-        "✅ метка отправлена.\n\nтеперь твой ход 👀\nхочешь узнать, что думают о тебе?",
-        reply_markup=build_main_kb(),
+        "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти.",
+        reply_markup=build_after_rate_kb(),
     )
 
     target_id = db.get_user_id_by_username(target)
@@ -404,6 +616,7 @@ async def on_rate(callback: types.CallbackQuery):
         text = f"Тебя оценили: {label}"
         if extra:
             text = f"{text}\n\n{extra}"
+        text = f"{text}\n\n{random.choice(NEW_ANSWER_HINTS)}"
 
         async def _send_notify() -> None:
             try:
@@ -415,8 +628,25 @@ async def on_rate(callback: types.CallbackQuery):
         asyncio.create_task(_send_notify())
 
         rows_after = db.get_stats(target)
+        after_dimensions = db.get_contact_dimensions(target)
+        rec_after = pick_recommendation(after_dimensions)
         counts_after = {k: int(v) for k, v in rows_after}
         after_label_count = counts_after.get(label, 0)
+        if rec_before != rec_after:
+            async def _send_recommendation_changed_hint() -> None:
+                try:
+                    await asyncio.wait_for(
+                        callback.bot.send_message(
+                            target_id,
+                            "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
+                        ),
+                        timeout=3.0,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_recommendation_changed_hint())
+
         if len(counts_after) >= 2 and after_label_count > max_before and before_label_count <= max_before:
             async def _send_shift_hint() -> None:
                 try:
