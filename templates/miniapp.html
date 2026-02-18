@@ -27,7 +27,7 @@
       --space-3: 14px;
       --space-4: 18px;
       --safe: env(safe-area-inset-bottom, 0px);
-      --nav-space: 104px;
+      --nav-space: 24px;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -101,8 +101,8 @@
       flex-wrap: wrap;
     }
     .avatar-wrap {
-      width: 72px;
-      height: 72px;
+      width: 108px;
+      height: 108px;
       border-radius: 999px;
       overflow: hidden;
       border: 1px solid var(--line);
@@ -192,6 +192,7 @@
       gap: 8px;
       margin-top: 0;
       flex-wrap: wrap;
+      pointer-events: none;
     }
     .chip {
       min-width: 34px;
@@ -205,6 +206,7 @@
       font-size: 18px;
       border: 1px solid var(--line);
       box-shadow: none;
+      pointer-events: none;
     }
 
     .bubble {
@@ -624,8 +626,8 @@
       transform: translateX(-50%);
       bottom: calc(var(--space-4) + var(--safe));
       width: auto;
-      padding: 4px;
-      border-radius: 22px;
+      padding: 6px;
+      border-radius: 28px;
       border: 1px solid var(--line);
       background: color-mix(in srgb, var(--surface) 86%, transparent);
       box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
@@ -637,9 +639,9 @@
     }
     .tab-btn {
       border: 0;
-      border-radius: 16px;
-      width: clamp(44px, 14vw, 52px);
-      height: clamp(44px, 14vw, 52px);
+      border-radius: 22px;
+      width: clamp(62px, 20vw, 78px);
+      height: clamp(62px, 20vw, 78px);
       justify-self: center;
       padding: 0;
       background: transparent;
@@ -658,8 +660,8 @@
       line-height: 0;
     }
     .tab-ico svg {
-      width: 20px;
-      height: 20px;
+      width: 29px;
+      height: 29px;
       stroke: currentColor;
       fill: none;
       stroke-width: 2;
@@ -703,7 +705,7 @@
     @media (max-width: 560px) {
       .wrap { padding: 0 0 calc(var(--nav-space) + var(--safe)); }
       .profile-head { grid-template-columns: auto 1fr; }
-      .avatar-wrap { width: 64px; height: 64px; }
+      .avatar-wrap { width: 96px; height: 96px; }
       .name { font-size: 15px; }
       .chip { height: 32px; min-width: 32px; font-size: 17px; }
       .bubble { font-size: 14px; }
