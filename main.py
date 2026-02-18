@@ -878,7 +878,7 @@ async def process_feedback_submission(
         after_dimensions = await db_call(db.get_contact_dimensions, target)
         rec_after = pick_recommendation(after_dimensions)
         total = await db_call(db.get_total, target)
-        if rec_before != rec_after:
+        if before_total >= 3 and total >= 3 and rec_before != rec_after:
             queue_coroutine(
                 send_tracked_push(
                     bot,

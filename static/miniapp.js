@@ -13,6 +13,7 @@
   const saveProfileBtn = document.getElementById("saveProfileBtn");
   const cancelProfileBtn = document.getElementById("cancelProfileBtn");
   const summaryBubble = document.getElementById("summaryBubble");
+  const summaryBubbleWrap = document.querySelector(".bubble-wrap");
   const summaryNotes = document.getElementById("summaryNotes");
   const answersBlock = document.getElementById("answersBlock");
   const answersList = document.getElementById("answersList");
@@ -26,6 +27,7 @@
   const chipTone = document.getElementById("chipTone");
   const chipSpeed = document.getElementById("chipSpeed");
   const chipFormat = document.getElementById("chipFormat");
+  const chipsContainer = document.querySelector(".chips");
   const copyToast = document.getElementById("copyToast");
 
   const answerStatus = document.getElementById("answerStatus");
@@ -75,6 +77,7 @@
   let inviteLink = "";
   let foreignProfileIsAppUser = true;
   let foreignProfileUsername = "";
+  let currentProfileNoteText = "";
   let answerFlowTarget = "";
   let answerFlowStep = -1;
   let currentProfileUsername = "";
@@ -402,7 +405,7 @@
     }
   }
 
-  function renderProfile(d) {
+  function renderProfile(d, isForeign = showingForeignProfile) {
     profileLink.textContent = d.link || "—";
     inviteLink = d.invite_link || inviteLink;
     if (profilePresence) {
@@ -411,7 +414,22 @@
 
     setAvatar(d.user || {});
     const noteText = String(d.profile_note || "").trim();
-    summaryBubble.textContent = noteText || "";
+    currentProfileNoteText = noteText;
+    const hideBubble = isForeign && d.enough && !noteText;
+    if (summaryBubbleWrap) {
+      summaryBubbleWrap.style.display = hideBubble ? "none" : "";
+    }
+    if (!isForeign) {
+      const showOwnPlaceholder = !noteText;
+      summaryBubble.textContent = noteText || "напиши что-нибудь о себе";
+      summaryBubble.classList.toggle("placeholder", showOwnPlaceholder);
+    } else if (!d.enough) {
+      summaryBubble.textContent = buildSummaryText(d);
+      summaryBubble.classList.remove("placeholder");
+    } else {
+      summaryBubble.textContent = noteText;
+      summaryBubble.classList.remove("placeholder");
+    }
     const notes = [];
     if (d.caution_block) notes.push("⚠️ иногда лучше не давить");
     if (d.uncertain_block) notes.push("ℹ️ по некоторым пунктам мнения расходятся");
@@ -487,7 +505,7 @@
     try {
       const endpoint = previewMode ? "/api/miniapp/preview" : "/api/miniapp/me";
       const resp = await api(endpoint);
-      renderProfile(resp.data);
+      renderProfile(resp.data, false);
       showingForeignProfile = false;
       foreignProfileIsAppUser = true;
       foreignProfileUsername = "";
@@ -518,11 +536,11 @@
         data.target = normalized;
         data.link = "https://t.me/getxposedbot?start=ref_" + normalized.replace("@", "");
         data.is_app_user = false;
-        renderProfile(data);
+        renderProfile(data, true);
         foreignProfileIsAppUser = false;
       } else {
         const resp = await api("/api/miniapp/profile?target=" + encodeURIComponent(normalized));
-        renderProfile(resp.data);
+        renderProfile(resp.data, true);
         foreignProfileIsAppUser = !!resp.data.is_app_user;
       }
       showingForeignProfile = true;
@@ -902,7 +920,7 @@
     editProfileBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       if (showingForeignProfile) return;
-      profileNoteInput.value = (profileNote && profileNote.textContent) ? profileNote.textContent : "";
+      profileNoteInput.value = currentProfileNoteText || "";
       profileEditor.style.display = "grid";
       profileNoteInput.focus();
     });
@@ -961,6 +979,16 @@
     profileHeadLink.addEventListener("click", () => {
       openTelegramProfile(currentProfileUsername);
     });
+  }
+
+  if (chipsContainer) {
+    const stopOpenProfile = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    chipsContainer.addEventListener("click", stopOpenProfile);
+    chipsContainer.addEventListener("touchstart", stopOpenProfile, { passive: false });
+    chipsContainer.addEventListener("mousedown", stopOpenProfile);
   }
 
   copyLink.addEventListener("click", async function () {

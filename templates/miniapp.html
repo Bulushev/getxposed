@@ -192,7 +192,6 @@
       gap: 8px;
       margin-top: 0;
       flex-wrap: wrap;
-      pointer-events: none;
     }
     .chip {
       min-width: 34px;
@@ -206,7 +205,6 @@
       font-size: 18px;
       border: 1px solid var(--line);
       box-shadow: none;
-      pointer-events: none;
     }
 
     .bubble {
@@ -221,6 +219,10 @@
       position: relative;
       box-shadow: none;
       white-space: pre-wrap;
+    }
+    .bubble.placeholder {
+      font-style: italic;
+      opacity: .95;
     }
     .bubble-wrap {
       position: relative;
