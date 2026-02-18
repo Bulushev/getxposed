@@ -14,6 +14,8 @@
   const cancelProfileBtn = document.getElementById("cancelProfileBtn");
   const summaryBubble = document.getElementById("summaryBubble");
   const summaryBubbleWrap = document.querySelector(".bubble-wrap");
+  const metricVisitors = document.getElementById("metricVisitors");
+  const metricAnswers = document.getElementById("metricAnswers");
   const summaryNotes = document.getElementById("summaryNotes");
   const answersBlock = document.getElementById("answersBlock");
   const answersList = document.getElementById("answersList");
@@ -51,7 +53,6 @@
   const targetInput = document.getElementById("target");
   const userSuggestions = document.getElementById("userSuggestions");
   const insightTarget = document.getElementById("insightTarget");
-  const insightSuggestions = document.getElementById("insightSuggestions");
   const choiceButtons = document.querySelectorAll(".choice-btn");
   const choiceGroups = Array.from(document.querySelectorAll(".choice-group"));
 
@@ -71,6 +72,7 @@
     caution: "",
     frequency: "",
     comm_format: "",
+    uncertainty: "",
   };
   let showingForeignProfile = false;
   let ownProfileLink = "";
@@ -81,7 +83,7 @@
   let answerFlowTarget = "";
   let answerFlowStep = -1;
   let currentProfileUsername = "";
-  const ANSWER_FIELDS = [
+  const BASE_ANSWER_FIELDS = [
     "tone",
     "speed",
     "contact_format",
@@ -90,12 +92,21 @@
     "attention_reaction",
     "caution",
     "frequency",
-    "comm_format",
   ];
+  let flowAnswerFields = [...BASE_ANSWER_FIELDS];
+  let adaptiveToneQuestion = false;
+  let adaptiveStructureQuestion = false;
+  const flowFieldSet = new Set(BASE_ANSWER_FIELDS);
   let swipeStartX = 0;
   let swipeStartY = 0;
   let swipeStarted = false;
   let swipeLocked = false;
+  const groupByField = {};
+  choiceGroups.forEach((group) => {
+    const firstBtn = group.querySelector(".choice-btn[data-field]");
+    const field = firstBtn ? firstBtn.dataset.field : "";
+    if (field) groupByField[field] = group;
+  });
 
   function setTab(name) {
     profileBlock.style.display = name === "profile" ? "block" : "none";
@@ -144,8 +155,8 @@
   function updateAnswersTitle() {
     if (!answersTitle) return;
     answersTitle.textContent = showingForeignProfile
-      ? "Как обычно воспринимают этого человека"
-      : "Как тебя обычно воспринимают";
+      ? "Каким его/её видят другие"
+      : "Каким тебя видят другие";
   }
 
   tabProfile.addEventListener("click", async () => {
@@ -158,16 +169,13 @@
   tabAnswer.addEventListener("click", () => setTab("answer"));
   tabInsight.addEventListener("click", () => {
     setTab("insight");
-    loadInsightSuggestions();
   });
   insightTarget.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       const value = insightTarget.value.trim();
       if (!value) return;
-      addToLocalInsightHistory(value);
       loadTargetProfile(value);
-      loadInsightSuggestions();
     }
   });
   choiceButtons.forEach((btn) => {
@@ -175,8 +183,8 @@
       const field = btn.dataset.field;
       const value = btn.dataset.value;
       if (!field || !value) return;
-      const group = btn.closest(".choice-group");
-      const groupIndex = group ? Number(group.dataset.step || -1) : -1;
+      if (!flowFieldSet.has(field)) return;
+      const groupIndex = flowAnswerFields.indexOf(field);
       // Allow changing already opened steps; block only steps not opened yet.
       if (groupIndex < 0 || groupIndex > answerFlowStep) return;
       selected[field] = value;
@@ -184,7 +192,7 @@
       document.querySelectorAll(`.choice-btn[data-field="${field}"]`).forEach((b) => {
         b.classList.toggle("active", b === btn);
       });
-      if (groupIndex === answerFlowStep && field === ANSWER_FIELDS[answerFlowStep]) {
+      if (groupIndex === answerFlowStep && field === flowAnswerFields[answerFlowStep]) {
         revealNextAnswerStep();
       }
     });
@@ -350,6 +358,15 @@
     return "Как к тебе проще начать общение\n\nСобрали полную картину по карточкам ниже.";
   }
 
+  function pluralRu(n, one, two, many) {
+    const v = Math.abs(Number(n) || 0) % 100;
+    const n1 = v % 10;
+    if (v > 10 && v < 20) return many;
+    if (n1 > 1 && n1 < 5) return two;
+    if (n1 === 1) return one;
+    return many;
+  }
+
   function setAvatar(user) {
     const name = (user && (user.first_name || user.username || user.last_name)) || "User";
     const firstName = user && user.first_name ? String(user.first_name).trim() : "";
@@ -414,6 +431,14 @@
 
     setAvatar(d.user || {});
     const noteText = String(d.profile_note || "").trim();
+    const visitors = Number(d.visitors || 0);
+    const answers = Number(d.answers || 0);
+    if (metricVisitors) {
+      metricVisitors.textContent = `${visitors} ${pluralRu(visitors, "человек", "человека", "человек")}`;
+    }
+    if (metricAnswers) {
+      metricAnswers.textContent = `${answers} ${pluralRu(answers, "ответ", "ответа", "ответов")}`;
+    }
     currentProfileNoteText = noteText;
     const hideBubble = isForeign && d.enough && !noteText;
     if (summaryBubbleWrap) {
@@ -430,10 +455,9 @@
       summaryBubble.textContent = noteText;
       summaryBubble.classList.remove("placeholder");
     }
-    const notes = [];
-    if (d.caution_block) notes.push("⚠️ иногда лучше не давить");
-    if (d.uncertain_block) notes.push("ℹ️ по некоторым пунктам мнения расходятся");
-    summaryNotes.textContent = notes.join("\n");
+    const extraHint = d.extra_hint ? String(d.extra_hint) : "";
+    summaryNotes.textContent = extraHint;
+    summaryNotes.classList.toggle("has-icon", Boolean(extraHint));
     if (profileNote) {
       profileNote.style.display = "none";
       profileNote.textContent = "";
@@ -451,34 +475,8 @@
     }
 
     if (answersBlock && answersList) {
-      const cards = Array.isArray(d.answer_cards) ? d.answer_cards : [];
-      if (cards.length) {
-        const byId = {};
-        cards.forEach((c) => {
-          if (c && c.id) byId[c.id] = c;
-        });
-        const rows = [];
-        rows.push({
-          title: "Темп",
-          value: ((byId.tempo && byId.tempo.value) || (byId.frequency && byId.frequency.value) || "—"),
-        });
-        rows.push({
-          title: "Инициатива",
-          value: ((byId.pressure && byId.pressure.value) || (byId.initiative && byId.initiative.value) || "—"),
-        });
-        rows.push({
-          title: "Контакт",
-          value: ((byId.style && byId.style.value) || (byId.first_reaction && byId.first_reaction.value) || "—"),
-        });
-
-        const firstReaction = String((byId.first_reaction && byId.first_reaction.value) || "").toLowerCase();
-        if (firstReaction.includes("сначала смотрит")) {
-          rows.push({
-            title: "Дополнительно",
-            value: "ℹ️ реакции могут быть не сразу",
-          });
-        }
-
+      const rows = Array.isArray(d.result_rows) ? d.result_rows : [];
+      if (rows.length) {
         answersList.innerHTML = "";
         rows.forEach((card) => {
           const row = document.createElement("div");
@@ -562,8 +560,18 @@
     return v;
   }
 
+  function configureAdaptiveFlow(adaptive) {
+    adaptiveToneQuestion = !!(adaptive && adaptive.ask_tone_question);
+    adaptiveStructureQuestion = !!(adaptive && adaptive.ask_uncertainty_question);
+    flowAnswerFields = [...BASE_ANSWER_FIELDS];
+    if (adaptiveToneQuestion) flowAnswerFields.push("comm_format");
+    if (adaptiveStructureQuestion) flowAnswerFields.push("uncertainty");
+    flowFieldSet.clear();
+    flowAnswerFields.forEach((f) => flowFieldSet.add(f));
+  }
+
   function clearAnswerSelections() {
-    ANSWER_FIELDS.forEach((field) => {
+    Object.keys(selected).forEach((field) => {
       selected[field] = "";
       document.querySelectorAll(`.choice-btn[data-field="${field}"]`).forEach((b) => {
         b.classList.remove("active");
@@ -573,15 +581,16 @@
 
   function updateAnswerProgress() {
     if (!answerProgress || !answerProgressBar) return;
-    const total = ANSWER_FIELDS.length;
-    const done = ANSWER_FIELDS.filter((field) => Boolean(selected[field])).length;
+    const total = flowAnswerFields.length;
+    const done = flowAnswerFields.filter((field) => Boolean(selected[field])).length;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     answerProgressBar.style.width = pct + "%";
   }
 
   function getChoicePayload(stepIndex) {
-    if (stepIndex < 0 || stepIndex >= ANSWER_FIELDS.length) return null;
-    const group = choiceGroups[stepIndex];
+    if (stepIndex < 0 || stepIndex >= flowAnswerFields.length) return null;
+    const field = flowAnswerFields[stepIndex];
+    const group = groupByField[field];
     if (!group) return null;
     const title = ((group.querySelector(".choice-title") || {}).textContent || "").trim();
     const buttons = group.querySelectorAll(".choice-btn");
@@ -615,6 +624,7 @@
   function resetAnswerFlow() {
     answerFlowStep = -1;
     answerFlowTarget = "";
+    configureAdaptiveFlow({ ask_tone_question: false, ask_uncertainty_question: false });
     clearAnswerSelections();
     choiceGroups.forEach((g) => g.classList.remove("visible"));
     sendAnswerBtn.style.display = "none";
@@ -633,23 +643,26 @@
   }
 
   function revealStep(index) {
-    if (index < 0 || index >= choiceGroups.length) return;
+    if (index < 0 || index >= flowAnswerFields.length) return;
+    const field = flowAnswerFields[index];
+    const targetGroup = groupByField[field];
+    if (!targetGroup) return;
     choiceGroups.forEach((g, i) => {
-      if (i !== index) g.classList.remove("visible");
+      if (g !== targetGroup) g.classList.remove("visible");
     });
-    choiceGroups[index].classList.add("visible");
+    targetGroup.classList.add("visible");
     renderSwipeCard(index);
   }
 
   function revealNextAnswerStep() {
     const next = answerFlowStep + 1;
-    if (next < choiceGroups.length) {
+    if (next < flowAnswerFields.length) {
       answerFlowStep = next;
       revealStep(next);
-      sendAnswerBtn.style.display = next === (choiceGroups.length - 1) ? "block" : "none";
+      sendAnswerBtn.style.display = next === (flowAnswerFields.length - 1) ? "block" : "none";
       return;
     }
-    answerFlowStep = choiceGroups.length;
+    answerFlowStep = flowAnswerFields.length;
     sendAnswerBtn.style.display = "block";
   }
 
@@ -660,6 +673,10 @@
         avatar_url: "",
         first_name: "",
         username: target.replace(/^@/, ""),
+        adaptive: {
+          ask_tone_question: false,
+          ask_uncertainty_question: false,
+        },
       };
     }
     try {
@@ -676,9 +693,22 @@
         avatar_url: String(user.avatar_url || user.photo_url || ""),
         first_name: fn,
         username: String(user.username || target.replace(/^@/, "")),
+        adaptive: resp.data && resp.data.adaptive_questions ? resp.data.adaptive_questions : {
+          ask_tone_question: false,
+          ask_uncertainty_question: false,
+        },
       };
     } catch (e) {
-      return { title: target, avatar_url: "", first_name: "", username: target.replace(/^@/, "") };
+      return {
+        title: target,
+        avatar_url: "",
+        first_name: "",
+        username: target.replace(/^@/, ""),
+        adaptive: {
+          ask_tone_question: false,
+          ask_uncertainty_question: false,
+        },
+      };
     }
   }
 
@@ -722,111 +752,19 @@
     answerFlowTarget = target;
     answerStatus.textContent = "Подготовка...";
     const display = await resolveTargetDisplay(target);
+    configureAdaptiveFlow(display.adaptive || {});
     answerTargetTitle.textContent = "Оставляем ответ о " + display.title;
     if (answerTargetHead) answerTargetHead.style.display = "flex";
     setAnswerTargetAvatar(display);
     targetInput.style.display = "none";
     if (answerIntro) answerIntro.style.display = "none";
     if (answerHint) answerHint.style.display = "none";
-    if (answerBackBtn) answerBackBtn.style.display = "block";
+    if (answerBackBtn) answerBackBtn.style.display = "none";
     if (swipeCard) swipeCard.style.display = "grid";
-    if (answerProgress) answerProgress.style.display = "grid";
+    if (answerProgress) answerProgress.style.display = "none";
     updateAnswerProgress();
     answerStatus.textContent = "";
     revealNextAnswerStep();
-  }
-
-  function addToLocalInsightHistory(name) {
-    const normalized = normalizeName(name);
-    if (!normalized) return;
-    const key = "miniapp_insight_recent";
-    const raw = localStorage.getItem(key);
-    const arr = raw ? JSON.parse(raw) : [];
-    const next = [normalized, ...arr.filter((x) => x !== normalized)].slice(0, 20);
-    localStorage.setItem(key, JSON.stringify(next));
-  }
-
-  function getLocalInsightHistory() {
-    const key = "miniapp_insight_recent";
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    try {
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.map(normalizeName).filter(Boolean) : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function renderInsightSuggestions(items) {
-    const unique = [];
-    const seen = new Set();
-    items.map(normalizeName).filter(Boolean).forEach((x) => {
-      if (!seen.has(x)) {
-        seen.add(x);
-        unique.push(x);
-      }
-    });
-    insightSuggestions.innerHTML = "";
-    unique.slice(0, 20).forEach((u) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "item";
-
-      const avatar = document.createElement("span");
-      avatar.className = "item-avatar";
-      const uname = u.replace(/^@/, "");
-      const fallback = document.createElement("span");
-      fallback.textContent = (uname.slice(0, 1) || "?").toUpperCase();
-      avatar.appendChild(fallback);
-
-      const img = document.createElement("img");
-      img.alt = uname;
-      const candidates = [
-        "/api/miniapp/avatar?username=" + encodeURIComponent(uname),
-        "https://t.me/i/userpic/320/" + encodeURIComponent(uname) + ".jpg",
-      ];
-      let idx = 0;
-      img.src = candidates[idx];
-      img.onerror = () => {
-        idx += 1;
-        if (idx >= candidates.length) {
-          if (img.parentNode) img.parentNode.removeChild(img);
-          return;
-        }
-        img.src = candidates[idx];
-      };
-      img.onload = () => {
-        fallback.style.display = "none";
-      };
-      avatar.appendChild(img);
-
-      const text = document.createElement("span");
-      text.textContent = u;
-
-      btn.appendChild(avatar);
-      btn.appendChild(text);
-      btn.addEventListener("click", () => {
-        insightTarget.value = u;
-        addToLocalInsightHistory(u);
-        loadTargetProfile(u);
-      });
-      insightSuggestions.appendChild(btn);
-    });
-  }
-
-  async function loadInsightSuggestions() {
-    const localItems = getLocalInsightHistory();
-    try {
-      const endpoint = previewMode
-        ? "/api/miniapp/preview-recent-targets"
-        : "/api/miniapp/recent-targets";
-      const resp = await api(endpoint);
-      const remoteItems = Array.isArray(resp.items) ? resp.items : [];
-      renderInsightSuggestions([...localItems, ...remoteItems]);
-    } catch (e) {
-      renderInsightSuggestions(localItems);
-    }
   }
 
   let searchTimer = null;
@@ -879,7 +817,7 @@
       answerStatus.textContent = "Нельзя оставлять отзывы о ботах.";
       return;
     }
-    if (ANSWER_FIELDS.some((field) => !selected[field])) {
+    if (flowAnswerFields.some((field) => !selected[field])) {
       answerStatus.textContent = "Выбери все варианты перед отправкой.";
       return;
     }
@@ -893,10 +831,10 @@
       attention_reaction: selected.attention_reaction,
       caution: selected.caution,
       frequency: selected.frequency,
-      comm_format: selected.comm_format,
     };
+    if (flowFieldSet.has("comm_format")) payload.comm_format = selected.comm_format;
+    if (flowFieldSet.has("uncertainty")) payload.uncertainty = selected.uncertainty;
     try {
-      addToLocalInsightHistory(payload.target);
       const endpoint = previewMode ? "/api/miniapp/preview-feedback" : "/api/miniapp/feedback";
       const resp = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
       answerStatus.textContent = resp.message || "Отправлено";
@@ -1037,12 +975,8 @@
   if (tg) {
     tg.ready();
     tg.expand();
-    if (tg.themeParams && tg.themeParams.button_color) {
-      document.documentElement.style.setProperty("--blue", tg.themeParams.button_color);
-    }
   }
   async function initApp() {
-    loadInsightSuggestions();
     await loadProfile();
     resetAnswerFlow();
     const rateTarget = normalizeName(urlParams.get("rate") || "");

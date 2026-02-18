@@ -15,7 +15,11 @@
       --line: var(--tg-theme-section-separator-color, rgba(255, 255, 255, 0.08));
       --text: var(--tg-theme-text-color, #e6ebf0);
       --muted: var(--tg-theme-hint-color, #9aa7b5);
-      --blue: var(--tg-theme-button-color, #3390ec);
+      --blue: color-mix(
+        in srgb,
+        var(--tg-theme-accent-text-color, var(--tg-theme-link-color, #3390ec)) 72%,
+        var(--surface) 28%
+      );
       --accent: var(--tg-theme-link-color, var(--tg-theme-button-color, #3390ec));
       --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
       --button-fg: var(--tg-theme-button-text-color, #fff);
@@ -69,6 +73,14 @@
       display: grid;
       gap: 12px;
       margin-bottom: var(--space-1);
+    }
+    .profile-card {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface-soft);
     }
     .profile-head {
       display: grid;
@@ -227,6 +239,7 @@
     .bubble-wrap {
       position: relative;
       width: 100%;
+      display: none;
     }
     .bubble-edit-btn {
       position: absolute;
@@ -261,6 +274,50 @@
       font-size: 12px;
       line-height: 1.35;
       white-space: pre-wrap;
+    }
+    .summary-notes.has-icon {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: normal;
+    }
+    .summary-notes.has-icon::before {
+      content: "i";
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 14px;
+    }
+    .profile-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      border-radius: 12px;
+      padding: 10px;
+      display: grid;
+      gap: 4px;
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .metric-value {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
     .answers-block {
       margin-top: 10px;
@@ -642,8 +699,8 @@
     .tab-btn {
       border: 0;
       border-radius: 22px;
-      width: clamp(62px, 20vw, 78px);
-      height: clamp(62px, 20vw, 78px);
+      width: clamp(44px, 14vw, 54px);
+      height: clamp(44px, 14vw, 54px);
       justify-self: center;
       padding: 0;
       background: transparent;
@@ -662,8 +719,8 @@
       line-height: 0;
     }
     .tab-ico svg {
-      width: 15px;
-      height: 15px;
+      width: 20px;
+      height: 20px;
       stroke: currentColor;
       fill: none;
       stroke-width: 2;
@@ -719,36 +776,48 @@
   <section id="profileBlock" class="card">
     <div id="authStatus" class="status">Проверка Telegram сессии...</div>
     <div class="profile-layout">
-      <div class="profile-head">
-        <div class="avatar-wrap">
-          <img id="avatarImg" alt="avatar">
-          <div id="avatarFallback" class="avatar-fallback">U</div>
-        </div>
-        <div class="profile-meta">
-          <div class="name-row">
-            <div class="name-wrap">
-              <div class="name-top">
-                <div id="profileName" class="name">@username</div>
-                <div id="profilePresence" class="presence" style="display:none;">
-                  <span class="presence-dot"></span>
-                  <span>в приложении</span>
+      <div class="profile-card">
+        <div class="profile-head">
+          <div class="avatar-wrap">
+            <img id="avatarImg" alt="avatar">
+            <div id="avatarFallback" class="avatar-fallback">U</div>
+          </div>
+          <div class="profile-meta">
+            <div class="name-row">
+              <div class="name-wrap">
+                <div class="name-top">
+                  <div id="profileName" class="name">@username</div>
+                  <div id="profilePresence" class="presence" style="display:none;">
+                    <span class="presence-dot"></span>
+                    <span>в приложении</span>
+                  </div>
                 </div>
+                <div id="profileNote" class="profile-note" style="display:none;"></div>
               </div>
-              <div id="profileNote" class="profile-note" style="display:none;"></div>
+            </div>
+            <div class="chips">
+              <div id="chipTone" class="chip">🙂</div>
+              <div id="chipSpeed" class="chip">🐢</div>
+              <div id="chipFormat" class="chip">💬</div>
             </div>
           </div>
-          <div class="chips">
-            <div id="chipTone" class="chip">🙂</div>
-            <div id="chipSpeed" class="chip">🐢</div>
-            <div id="chipFormat" class="chip">💬</div>
+        </div>
+        <div class="bubble-wrap">
+          <div id="summaryBubble" class="bubble">Загрузка...</div>
+          <button id="editProfileBtn" class="bubble-edit-btn" title="Редактировать профиль" aria-label="Редактировать профиль">
+            <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </button>
+        </div>
+        <div class="profile-metrics">
+          <div class="metric">
+            <div class="metric-label">Уникальных посещений</div>
+            <div id="metricVisitors" class="metric-value">0 человек</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Оставлено ответов</div>
+            <div id="metricAnswers" class="metric-value">0 ответов</div>
           </div>
         </div>
-      </div>
-      <div class="bubble-wrap">
-        <div id="summaryBubble" class="bubble">Загрузка...</div>
-        <button id="editProfileBtn" class="bubble-edit-btn" title="Редактировать профиль" aria-label="Редактировать профиль">
-          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-        </button>
       </div>
       <div id="answersBlock" class="answers-block">
         <div id="answersTitle" class="answers-title">Как тебя обычно воспринимают</div>
@@ -897,8 +966,15 @@
       </div>
     </div>
     <div class="choice-group" data-step="9">
-      <div class="choice-title">мы собрали подсказку</div>
-      <div class="form-note">как к нему/ней проще подойти</div>
+      <div class="choice-title">🔟 Неопределённость — ок?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="uncertainty" data-value="low">
+          <span class="em">🧭</span>нормально
+        </button>
+        <button class="choice-btn" type="button" data-field="uncertainty" data-value="high">
+          <span class="em">🚧</span>лучше конкретно
+        </button>
+      </div>
     </div>
     <button id="sendAnswer" class="primary" style="display:none;">Отправить</button>
     <div id="answerStatus" class="status-line"></div>
@@ -908,8 +984,6 @@
     <div class="form-note">Узнать, как лучше начать контакт</div>
     <input id="insightTarget" placeholder="@username">
     <div class="form-note">Нажми Enter — откроем профиль этого человека</div>
-    <div class="form-note">Люди, о которых ты уже оставлял ответы или недавно смотрел:</div>
-    <div id="insightSuggestions" class="suggestions"></div>
   </section>
 </div>
 

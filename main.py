@@ -1,24 +1,29 @@
 import asyncio
-import hashlib
-import hmac
-import io
-import json
 import logging
 import os
-import random
-import re
-import time
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, CommandStart
 from aiogram.filters.command import CommandObject
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 
 import db
+from app.profile import (
+    build_contact_insight_text,
+    build_profile_payload,
+    normalize_feedback_value,
+    normalize_username,
+)
+from app.push import PushManager
+from app.telegram_profile import (
+    fetch_avatar_from_telegram,
+    fetch_public_user_from_telegram,
+    fetch_user_bio_from_telegram,
+)
+from app.ui import build_launch_kb
+from app.webapp_auth import build_avatar_proxy_url, get_webapp_user
 
 load_dotenv()
 
@@ -35,69 +40,11 @@ logging.basicConfig(level=logging.WARNING)
 router = Router()
 health_app = Flask(__name__)
 
-USERNAME_RE = re.compile(r"^@([A-Za-z0-9_]{3,32})$")
 BOT_USERNAME_CACHE: Optional[str] = None
 APP_BOT: Optional[Bot] = None
 APP_LOOP: Optional[asyncio.AbstractEventLoop] = None
-NEW_ANSWER_HINTS = [
-    "👀 Появился новый взгляд",
-    "⚡ Картина стала чуть точнее",
-    "🔍 Кто-то помог уточнить первый шаг",
-]
 INITDATA_MAX_AGE_SECONDS = 86400
 PUSH_TIMEOUT_SECONDS = 15.0
-
-
-def normalize_username(raw: str) -> Optional[str]:
-    raw = raw.strip()
-    m = USERNAME_RE.match(raw)
-    if not m:
-        return None
-    return f"@{m.group(1).lower()}"
-
-
-def pick_recommendation(dimensions: dict[str, dict[str, int]]) -> tuple[str, str, str]:
-    tone_counts = dimensions.get("tone", {})
-    speed_counts = dimensions.get("speed", {})
-    format_counts = dimensions.get("contact_format", {})
-
-    tone_pick = "easy" if tone_counts.get("easy", 0) >= tone_counts.get("serious", 0) else "serious"
-    speed_pick = "slow" if speed_counts.get("slow", 0) >= speed_counts.get("fast", 0) else "fast"
-    format_pick = "text" if format_counts.get("text", 0) >= format_counts.get("live", 0) else "live"
-    return tone_pick, speed_pick, format_pick
-
-
-def pick_majority(dimensions: dict[str, dict[str, int]], field: str, left: str, right: str) -> str:
-    counts = dimensions.get(field, {})
-    return left if counts.get(left, 0) >= counts.get(right, 0) else right
-
-
-def build_answer_cards(dimensions: dict[str, dict[str, int]]) -> list[dict]:
-    spec = [
-        ("style", "Как лучше начать", "tone", "easy", "serious", "🙂 с шутки", "🧠 по делу"),
-        ("tempo", "Темп", "speed", "fast", "slow", "🔥 сразу", "🐢 не спеша"),
-        ("channel", "Канал", "contact_format", "text", "live", "💬 в переписке", "🎤 вживую"),
-        ("initiative", "Первый шаг", "initiative", "self", "wait", "👉 ему/ей ок, если напишут", "👀 лучше, если сначала присмотрятся"),
-        ("start_context", "Контекст старта", "start_context", "topic", "direct", "🌱 с лёгкого", "🎯 сразу по сути"),
-        ("first_reaction", "Реакция в начале", "attention_reaction", "likes", "careful", "😊 быстро включается", "😶 сначала смотрит"),
-        ("pressure", "Давление", "caution", "false", "true", "🫶 можно активнее", "⚠️ лучше аккуратно"),
-        ("frequency", "Частота", "frequency", "often", "rare", "📬 можно часто", "🕰 лучше редко"),
-        ("tone", "Тон общения", "comm_format", "informal", "reserved", "😄 свободно", "🤝 сдержанно"),
-        ("vibe", "Вайб", "emotion_tone", "warm", "neutral", "☀️ легко", "🌙 спокойно"),
-        ("dialog", "Диалог", "feedback_style", "direct", "soft", "💬 любит обсуждать", "👂 больше слушает"),
-        ("certainty", "Неопределённость", "uncertainty", "low", "high", "🧭 нормально", "🚧 лучше конкретно"),
-    ]
-    cards: list[dict] = []
-    for key, title, field, left_key, right_key, left_text, right_text in spec:
-        pick = pick_majority(dimensions, field, left_key, right_key)
-        cards.append(
-            {
-                "id": key,
-                "title": title,
-                "value": left_text if pick == left_key else right_text,
-            }
-        )
-    return cards
 
 
 @health_app.get("/health")
@@ -117,7 +64,7 @@ def miniapp_index():
 
 @health_app.get("/api/miniapp/me")
 def api_miniapp_me():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -183,6 +130,7 @@ def api_miniapp_preview():
                 "target": "@preview_user",
                 "viewed": 18,
                 "answers": 13,
+                "visitors": 18,
                 "silent": 5,
                 "enough": True,
                 "recommendation": {"tone": "easy", "speed": "slow", "format": "text"},
@@ -192,12 +140,16 @@ def api_miniapp_preview():
                 "invite_link": f"https://t.me/{get_bot_public_username()}",
                 "is_app_user": True,
                 "profile_note": "Люблю спокойное и уважительное общение.",
-                "answer_cards": [
-                    {"id": "style", "title": "Стиль входа", "value": "🙂 с шутки"},
-                    {"id": "tempo", "title": "Темп", "value": "🐢 не спеша"},
-                    {"id": "channel", "title": "Канал", "value": "💬 в переписке"},
-                    {"id": "initiative", "title": "Первый шаг", "value": "👀 лучше, если сначала присмотрятся"},
+                "result_rows": [
+                    {"title": "Темп", "value": "лучше не спеша и без частых сообщений"},
+                    {"title": "Инициатива", "value": "лучше аккуратно и без давления"},
+                    {"title": "Контакт", "value": "легче начать с шутки и переписки"},
                 ],
+                "extra_hint": "Человеку может понадобиться время на ответ",
+                "adaptive_questions": {
+                    "ask_tone_question": False,
+                    "ask_uncertainty_question": False,
+                },
                 "user": {
                     "id": 1,
                     "username": "preview_user",
@@ -213,7 +165,7 @@ def api_miniapp_preview():
 
 @health_app.get("/api/miniapp/profile")
 def api_miniapp_profile():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -274,7 +226,7 @@ def api_miniapp_profile():
 
 @health_app.post("/api/miniapp/profile-note")
 def api_miniapp_profile_note():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     body = request.get_json(silent=True) or {}
@@ -317,7 +269,7 @@ def api_miniapp_avatar():
 
 @health_app.get("/api/miniapp/insight")
 def api_miniapp_insight():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -348,7 +300,7 @@ def api_miniapp_preview_insight():
 
 @health_app.get("/api/miniapp/search-users")
 def api_miniapp_search_users():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     q = str(request.args.get("q") or "")
@@ -372,35 +324,9 @@ def api_miniapp_preview_users():
     )
 
 
-@health_app.get("/api/miniapp/recent-targets")
-def api_miniapp_recent_targets():
-    user = get_webapp_user()
-    if not user:
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    voter_id = int(user.get("id"))
-    items = db.list_recent_targets_for_voter(voter_id, 20)
-    return jsonify({"ok": True, "items": items})
-
-
-@health_app.get("/api/miniapp/preview-recent-targets")
-def api_miniapp_preview_recent_targets():
-    return jsonify(
-        {
-            "ok": True,
-            "items": [
-                "@bulushew",
-                "@pursenka",
-                "@blackgrizzly17",
-                "@artemeeey",
-                "@taaarraaas",
-            ],
-        }
-    )
-
-
 @health_app.post("/api/miniapp/feedback")
 def api_miniapp_feedback():
-    user = get_webapp_user()
+    user = get_webapp_user(request, BOT_TOKEN, INITDATA_MAX_AGE_SECONDS)
     if not user:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     if APP_LOOP is None or APP_BOT is None:
@@ -412,7 +338,7 @@ def api_miniapp_feedback():
         return jsonify({"ok": False, "error": "Нужен корректный @username"}), 400
     try:
         allowed, reason = asyncio.run_coroutine_threadsafe(
-            validate_feedback_target(APP_BOT, target),
+            get_push_manager().validate_feedback_target(APP_BOT, target),
             APP_LOOP,
         ).result(timeout=5)
     except Exception:
@@ -446,7 +372,7 @@ def api_miniapp_feedback():
             queue_coroutine(notify_admin_new_user(APP_BOT, voter_id, f"@{username}", "miniapp"))
 
     future = asyncio.run_coroutine_threadsafe(
-        process_feedback_submission(
+        get_push_manager().process_feedback_submission(
             APP_BOT,
             target,
             voter_id,
@@ -480,28 +406,6 @@ def api_miniapp_feedback():
 @health_app.post("/api/miniapp/preview-feedback")
 def api_miniapp_preview_feedback():
     return jsonify({"ok": True, "result": "inserted", "message": "Готово 👍 (preview)"})
-
-
-def with_rate_param(url: str, target: Optional[str]) -> str:
-    if not target:
-        return url
-    uname = target.lstrip("@").lower()
-    if not uname:
-        return url
-    parts = urlsplit(url)
-    pairs = list(parse_qsl(parts.query, keep_blank_values=True))
-    pairs = [(k, v) for (k, v) in pairs if k != "rate"]
-    pairs.append(("rate", uname))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
-
-
-def build_launch_kb(prefill_target: Optional[str] = None) -> Optional[types.InlineKeyboardMarkup]:
-    if not MINI_APP_URL:
-        return None
-    app_url = with_rate_param(MINI_APP_URL, prefill_target)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Открыть приложение", web_app=types.WebAppInfo(url=app_url))
-    return kb.as_markup()
 
 
 async def notify_admin_new_user(bot: Bot, user_id: int, username: str, source: str) -> None:
@@ -573,98 +477,6 @@ def get_bot_public_username() -> str:
     return BOT_USERNAME_CACHE or BOT_PUBLIC_USERNAME
 
 
-def verify_telegram_init_data(init_data: str) -> Optional[dict]:
-    if not init_data:
-        return None
-    pairs = dict(parse_qsl(init_data, keep_blank_values=True))
-    provided_hash = pairs.pop("hash", None)
-    if not provided_hash:
-        return None
-
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
-    secret = hmac.new(b"WebAppData", BOT_TOKEN.encode("utf-8"), hashlib.sha256).digest()
-    calculated_hash = hmac.new(secret, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(calculated_hash, provided_hash):
-        return None
-
-    auth_date_raw = pairs.get("auth_date")
-    try:
-        auth_date = int(auth_date_raw) if auth_date_raw else 0
-    except ValueError:
-        return None
-    if auth_date <= 0 or abs(int(time.time()) - auth_date) > INITDATA_MAX_AGE_SECONDS:
-        return None
-
-    user_raw = pairs.get("user")
-    if not user_raw:
-        return None
-    try:
-        user = json.loads(user_raw)
-    except json.JSONDecodeError:
-        return None
-    return user if isinstance(user, dict) else None
-
-
-def get_webapp_user() -> Optional[dict]:
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    return verify_telegram_init_data(init_data)
-
-
-def build_avatar_proxy_url(username: str) -> str:
-    uname = username.lstrip("@").lower()
-    return f"/api/miniapp/avatar?username={uname}"
-
-
-def normalize_feedback_value(value: str, allowed: set[str], default: str) -> str:
-    return value if value in allowed else default
-
-
-def build_profile_payload(target: str) -> dict:
-    total = db.get_total(target)
-    ref_count = db.count_ref_visitors(target)
-    dimensions = db.get_contact_dimensions(target)
-    combined = total + ref_count
-    viewed = int(combined * 1.4)
-    silent = max(0, viewed - total)
-    result = {
-        "target": target,
-        "viewed": viewed,
-        "answers": total,
-        "silent": silent,
-        "enough": total >= 3,
-        "recommendation": None,
-        "caution_block": False,
-        "uncertain_block": False,
-        "answer_cards": [],
-    }
-    if total < 3:
-        return result
-
-    tone_pick, speed_pick, format_pick = pick_recommendation(dimensions)
-    result["recommendation"] = {
-        "tone": tone_pick,
-        "speed": speed_pick,
-        "format": format_pick,
-    }
-    caution_counts = dimensions["caution"]
-    result["caution_block"] = (caution_counts["true"] / total) >= 0.3 if total > 0 else False
-
-    def is_uncertain(a: int, b: int) -> bool:
-        s = a + b
-        return s > 0 and max(a, b) / s < 0.6
-
-    tone_counts = dimensions["tone"]
-    speed_counts = dimensions["speed"]
-    format_counts = dimensions["contact_format"]
-    result["uncertain_block"] = (
-        is_uncertain(tone_counts["easy"], tone_counts["serious"])
-        or is_uncertain(speed_counts["fast"], speed_counts["slow"])
-        or is_uncertain(format_counts["text"], format_counts["live"])
-    )
-    result["answer_cards"] = build_answer_cards(dimensions)
-    return result
-
-
 def queue_coroutine(coro) -> None:
     if APP_LOOP is None:
         return
@@ -674,239 +486,20 @@ def queue_coroutine(coro) -> None:
         pass
 
 
-async def fetch_public_user_from_telegram(bot: Bot, target: str) -> Optional[dict]:
-    try:
-        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
-    except Exception:
-        return None
-    if chat.type != "private":
-        return None
-    username = (chat.username or target.lstrip("@")).lower()
-    return {
-        "id": int(chat.id),
-        "username": username,
-        "first_name": str(chat.first_name or ""),
-        "last_name": str(chat.last_name or ""),
-        "photo_url": "",
-    }
+PUSH_MANAGER: Optional[PushManager] = None
 
 
-async def fetch_user_bio_from_telegram(bot: Bot, user_id: int) -> str:
-    try:
-        chat = await asyncio.wait_for(bot.get_chat(user_id), timeout=3.0)
-    except Exception:
-        return ""
-    bio = str(getattr(chat, "bio", "") or "").strip()
-    if not bio:
-        return ""
-    return bio[:90]
-
-
-async def fetch_avatar_from_telegram(bot: Bot, username: str) -> Optional[tuple[bytes, str]]:
-    target = f"@{username.lstrip('@').lower()}"
-    try:
-        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
-    except Exception:
-        return None
-    if chat.type != "private" or not chat.photo or not chat.photo.big_file_id:
-        return None
-    try:
-        file = await asyncio.wait_for(bot.get_file(chat.photo.big_file_id), timeout=3.0)
-        buf = io.BytesIO()
-        await asyncio.wait_for(bot.download(file, destination=buf), timeout=5.0)
-        content = buf.getvalue()
-        if not content:
-            return None
-        path = (file.file_path or "").lower()
-        if path.endswith(".png"):
-            ctype = "image/png"
-        elif path.endswith(".webp"):
-            ctype = "image/webp"
-        else:
-            ctype = "image/jpeg"
-        return content, ctype
-    except Exception:
-        return None
-
-
-def build_contact_insight_text(target: str) -> Optional[str]:
-    total = db.get_total(target)
-    if total < 3:
-        return None
-
-    dimensions = db.get_contact_dimensions(target)
-    tone_counts = dimensions["tone"]
-    speed_counts = dimensions["speed"]
-    format_counts = dimensions["contact_format"]
-    caution_counts = dimensions["caution"]
-
-    tone_pick = "easy" if tone_counts["easy"] >= tone_counts["serious"] else "serious"
-    speed_pick = "slow" if speed_counts["slow"] >= speed_counts["fast"] else "fast"
-    format_pick = "text" if format_counts["text"] >= format_counts["live"] else "live"
-
-    tone_text = "с юмора" if tone_pick == "easy" else "спокойно, по делу"
-    speed_text = "не торопясь" if speed_pick == "slow" else "сразу"
-    format_text = "через переписку" if format_pick == "text" else "в живом общении"
-
-    lines = [
-        "Как с этим человеком чаще всего",
-        "начинают общение:",
-        "",
-        f"👉 {tone_text}",
-        f"👉 {speed_text}",
-        f"👉 {format_text}",
-    ]
-
-    def no_clear_majority(a: int, b: int) -> bool:
-        s = a + b
-        return s > 0 and max(a, b) / s < 0.6
-
-    uncertain = (
-        no_clear_majority(tone_counts["easy"], tone_counts["serious"])
-        or no_clear_majority(speed_counts["fast"], speed_counts["slow"])
-        or no_clear_majority(format_counts["text"], format_counts["live"])
-    )
-    if uncertain:
-        lines += [
-            "",
-            "По этому пункту мнения разделились —",
-            "лучше ориентироваться по ситуации.",
-        ]
-
-    caution_ratio = caution_counts["true"] / total if total > 0 else 0
-    if caution_ratio >= 0.3:
-        lines += [
-            "",
-            "⚠️ Иногда лучше не давить",
-            "и дать время.",
-        ]
-
-    return "\n".join(lines)
-
-
-async def send_tracked_push(bot: Bot, target_id: int, text: str) -> bool:
-    try:
-        await asyncio.wait_for(bot.send_message(target_id, text), timeout=PUSH_TIMEOUT_SECONDS)
-        return True
-    except Exception as exc:
-        target_username = (await db_call(db.get_username_by_user_id, target_id)) or f"id={target_id}"
-        reason = f"{type(exc).__name__}: {exc}"
-        reason_l = reason.lower()
-        should_delete = (
-            "bot was blocked by the user" in reason_l
-            or "chat not found" in reason_l
-            or "user is deactivated" in reason_l
-            or "forbidden" in reason_l
+def get_push_manager() -> PushManager:
+    global PUSH_MANAGER
+    if PUSH_MANAGER is None:
+        PUSH_MANAGER = PushManager(
+            db_call=db_call,
+            queue_coroutine=queue_coroutine,
+            build_profile_payload=build_profile_payload,
+            admin_username=ADMIN_USERNAME,
+            push_timeout_seconds=PUSH_TIMEOUT_SECONDS,
         )
-        if should_delete:
-            await db_call(db.delete_user_by_user_id, target_id)
-
-        admin_id = await db_call(db.get_user_id_by_username, f"@{ADMIN_USERNAME}")
-        if admin_id:
-            try:
-                await asyncio.wait_for(
-                    bot.send_message(
-                        admin_id,
-                        "Не удалось отправить push пользователю.\n"
-                        f"Пользователь: {target_username}\n"
-                        f"Причина: {reason}\n"
-                        + ("Пользователь удалён из /users." if should_delete else "Пользователь НЕ удалён (временная ошибка)."),
-                    ),
-                    timeout=PUSH_TIMEOUT_SECONDS,
-                )
-            except Exception:
-                pass
-        return False
-
-
-async def process_feedback_submission(
-    bot: Bot,
-    target: str,
-    voter_id: Optional[int],
-    tone: str,
-    speed: str,
-    contact_format: str,
-    initiative: str,
-    start_context: str,
-    attention_reaction: str,
-    caution: str,
-    frequency: str,
-    comm_format: str,
-    emotion_tone: str,
-    feedback_style: str,
-    uncertainty: str,
-) -> tuple[Optional[str], str]:
-    before_total = await db_call(db.get_total, target)
-    before_dimensions = await db_call(db.get_contact_dimensions, target)
-    rec_before = pick_recommendation(before_dimensions)
-    result = await db_call(
-        db.add_vote,
-        target,
-        "feedback",
-        voter_id,
-        tone,
-        speed,
-        contact_format,
-        caution,
-        initiative,
-        start_context,
-        attention_reaction,
-        frequency,
-        comm_format,
-        emotion_tone,
-        feedback_style,
-        uncertainty,
-    )
-    if result is None:
-        return None, "База недоступна, попробуй позже"
-    if result == "duplicate_recent":
-        target_id = await db_call(db.get_user_id_by_username, target)
-        first_seen = False
-        if target_id and voter_id is not None:
-            first_seen = await db_call(db.mark_seen_hint_sent, target, voter_id)
-        if target_id and first_seen:
-            queue_coroutine(send_tracked_push(bot, target_id, "👁 тебя явно рассматривают"))
-        return result, "Мнение можно менять не чаще 1 раза в сутки"
-
-    target_id = await db_call(db.get_user_id_by_username, target)
-    if target_id:
-        if result == "updated":
-            queue_coroutine(send_tracked_push(bot, target_id, "⚠️ Мнение одного человека о тебе изменилось."))
-        else:
-            queue_coroutine(send_tracked_push(bot, target_id, random.choice(NEW_ANSWER_HINTS)))
-
-        after_dimensions = await db_call(db.get_contact_dimensions, target)
-        rec_after = pick_recommendation(after_dimensions)
-        total = await db_call(db.get_total, target)
-        if before_total >= 3 and total >= 3 and rec_before != rec_after:
-            queue_coroutine(
-                send_tracked_push(
-                    bot,
-                    target_id,
-                    "⚠️ Картина изменилась.\nТеперь тебя считывают немного иначе.",
-                )
-            )
-        if before_total <= 5 < total:
-            queue_coroutine(send_tracked_push(bot, target_id, "🔥 вокруг тебя начинается движ"))
-
-    message = "Мнение обновлено." if result == "updated" else "Готово 👍\n\nТы помог понять,\nкак к этому человеку проще подойти."
-    return result, message
-
-
-async def validate_feedback_target(bot: Bot, target: str) -> tuple[bool, Optional[str]]:
-    username = target.lstrip("@").lower()
-    if username.endswith("bot"):
-        return False, "Нельзя оставлять отзывы о ботах."
-    try:
-        chat = await asyncio.wait_for(bot.get_chat(target), timeout=3.0)
-    except Exception:
-        return True, None
-    if chat.type in {"group", "supergroup"}:
-        return False, "Нельзя оставлять отзывы о чатах."
-    if chat.type == "channel":
-        return False, "Нельзя оставлять отзывы о каналах."
-    return True, None
-
+    return PUSH_MANAGER
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, command: CommandObject):
@@ -918,20 +511,10 @@ async def cmd_start(message: types.Message, command: CommandObject):
         target = normalize_username(f"@{raw}") if not raw.startswith("@") else normalize_username(raw)
         if target:
             ref_target = target
-            inserted = await db_call(db.add_ref_visit, target, message.from_user.id)
-            if inserted and APP_BOT:
-                owner = await db_call(db.get_user_public_by_username, target)
-                target_user_id = int(owner.get("id") or 0) if owner else 0
-                if target_user_id and target_user_id != message.from_user.id:
-                    queue_coroutine(
-                        send_tracked_push(
-                            APP_BOT,
-                            target_user_id,
-                            "🔥 похоже, ты запустил небольшую цепную реакцию.\n\nпо твоей ссылке пришёл новый человек 👀",
-                        )
-                    )
+            target_user_id = await db_call(db.get_user_id_by_username, target)
+            await db_call(db.add_ref_visit, target, message.from_user.id, target_user_id)
 
-    launch_kb = build_launch_kb(ref_target)
+    launch_kb = build_launch_kb(MINI_APP_URL, ref_target)
     if launch_kb:
         await message.answer("Открой приложение и оставь анонимный ответ 👇", reply_markup=launch_kb)
     else:
@@ -940,7 +523,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
 
 @router.message(Command("ref"))
 async def cmd_ref(message: types.Message):
-    launch_kb = build_launch_kb()
+    launch_kb = build_launch_kb(MINI_APP_URL)
     if launch_kb:
         await message.answer("Создание ссылок теперь в Mini App 👇", reply_markup=launch_kb)
     else:
@@ -949,7 +532,7 @@ async def cmd_ref(message: types.Message):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: types.Message):
-    launch_kb = build_launch_kb()
+    launch_kb = build_launch_kb(MINI_APP_URL)
     if launch_kb:
         await message.answer("Статистика теперь в Mini App 👇", reply_markup=launch_kb)
     else:
@@ -1026,7 +609,7 @@ async def on_text(message: types.Message):
     register_user(message)
     if (message.text or "").startswith("/"):
         return
-    launch_kb = build_launch_kb()
+    launch_kb = build_launch_kb(MINI_APP_URL)
     if launch_kb:
         await message.answer("Весь функционал перенесён в Mini App 👇", reply_markup=launch_kb)
     else:

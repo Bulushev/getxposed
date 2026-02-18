@@ -63,6 +63,7 @@ def init_db() -> bool:
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS emotion_tone TEXT DEFAULT 'neutral'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS feedback_style TEXT DEFAULT 'soft'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS uncertainty TEXT DEFAULT 'high'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS target_user_id BIGINT")
                     cur.execute(
                         """
                         CREATE TABLE IF NOT EXISTS users (
@@ -109,8 +110,23 @@ def init_db() -> bool:
                     )
                     cur.execute(
                         """
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique_user
+                        ON votes (target_user_id, voter_id)
+                        WHERE target_user_id IS NOT NULL AND voter_id IS NOT NULL
+                        """
+                    )
+                    cur.execute("ALTER TABLE ref_visits ADD COLUMN IF NOT EXISTS target_user_id BIGINT")
+                    cur.execute(
+                        """
                         CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
                         ON ref_visits (target, visitor_id)
+                        """
+                    )
+                    cur.execute(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique_user
+                        ON ref_visits (target_user_id, visitor_id)
+                        WHERE target_user_id IS NOT NULL
                         """
                     )
                     cur.execute(
@@ -120,6 +136,34 @@ def init_db() -> bool:
                             note TEXT DEFAULT '',
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS push_events (
+                            id SERIAL PRIMARY KEY,
+                            user_id BIGINT NOT NULL,
+                            event_type TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        UPDATE votes v
+                        SET target_user_id = u.user_id
+                        FROM users u
+                        WHERE v.target_user_id IS NULL
+                          AND LOWER(v.target) = LOWER(u.username)
+                        """
+                    )
+                    cur.execute(
+                        """
+                        UPDATE ref_visits r
+                        SET target_user_id = u.user_id
+                        FROM users u
+                        WHERE r.target_user_id IS NULL
+                          AND LOWER(r.target) = LOWER(u.username)
                         """
                     )
                 conn.commit()
@@ -203,6 +247,10 @@ def init_db() -> bool:
                 conn.execute("ALTER TABLE votes ADD COLUMN uncertainty TEXT DEFAULT 'high'")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN target_user_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -261,8 +309,26 @@ def init_db() -> bool:
             )
             conn.execute(
                 """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_unique_user
+                ON votes (target_user_id, voter_id)
+                WHERE target_user_id IS NOT NULL AND voter_id IS NOT NULL
+                """
+            )
+            try:
+                conn.execute("ALTER TABLE ref_visits ADD COLUMN target_user_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique
                 ON ref_visits (target, visitor_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_unique_user
+                ON ref_visits (target_user_id, visitor_id)
+                WHERE target_user_id IS NOT NULL
                 """
             )
             conn.execute(
@@ -272,6 +338,38 @@ def init_db() -> bool:
                     note TEXT DEFAULT '',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS push_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                UPDATE votes
+                SET target_user_id = (
+                    SELECT u.user_id FROM users u
+                    WHERE LOWER(u.username) = LOWER(votes.target)
+                    LIMIT 1
+                )
+                WHERE target_user_id IS NULL
+                """
+            )
+            conn.execute(
+                """
+                UPDATE ref_visits
+                SET target_user_id = (
+                    SELECT u.user_id FROM users u
+                    WHERE LOWER(u.username) = LOWER(ref_visits.target)
+                    LIMIT 1
+                )
+                WHERE target_user_id IS NULL
                 """
             )
             conn.commit()
@@ -284,6 +382,7 @@ def add_vote(
     target: str,
     label: str,
     voter_id: Optional[int],
+    target_user_id: Optional[int] = None,
     tone: str = "serious",
     speed: str = "slow",
     contact_format: str = "text",
@@ -306,27 +405,39 @@ def add_vote(
                 with conn.cursor() as cur:
                     if voter_id is None:
                         cur.execute(
-                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                            (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
+                            "INSERT INTO votes (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                         )
                         conn.commit()
                         return "inserted"
 
-                    cur.execute(
-                        """
-                        SELECT id, created_at, label
-                        FROM votes
-                        WHERE target = %s AND voter_id = %s
-                        ORDER BY id DESC
-                        LIMIT 1
-                        """,
-                        (target, voter_id),
-                    )
+                    if target_user_id is not None:
+                        cur.execute(
+                            """
+                            SELECT id, created_at, label
+                            FROM votes
+                            WHERE target_user_id = %s AND voter_id = %s
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (target_user_id, voter_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT id, created_at, label
+                            FROM votes
+                            WHERE target = %s AND voter_id = %s
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (target, voter_id),
+                        )
                     row = cur.fetchone()
                     if not row:
                         cur.execute(
-                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                            (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
+                            "INSERT INTO votes (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                         )
                         conn.commit()
                         return "inserted"
@@ -339,6 +450,8 @@ def add_vote(
                             """
                             UPDATE votes
                             SET label = %s,
+                                target = %s,
+                                target_user_id = %s,
                                 tone = %s,
                                 speed = %s,
                                 contact_format = %s,
@@ -354,7 +467,7 @@ def add_vote(
                                 created_at = CURRENT_TIMESTAMP
                             WHERE id = %s
                             """,
-                            ("feedback", tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
+                            ("feedback", target, target_user_id, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                         )
                         conn.commit()
                         return "inserted"
@@ -364,6 +477,8 @@ def add_vote(
                             """
                             UPDATE votes
                             SET label = %s,
+                                target = %s,
+                                target_user_id = %s,
                                 tone = %s,
                                 speed = %s,
                                 contact_format = %s,
@@ -379,7 +494,7 @@ def add_vote(
                                 created_at = CURRENT_TIMESTAMP
                             WHERE id = %s
                             """,
-                            (label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
+                            (label, target, target_user_id, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                         )
                         conn.commit()
                         return "updated"
@@ -396,26 +511,38 @@ def add_vote(
             with conn:
                 if voter_id is None:
                     conn.execute(
-                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
+                        "INSERT INTO votes (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                     )
                     return "inserted"
 
-                cur = conn.execute(
-                    """
-                    SELECT id, created_at, label
-                    FROM votes
-                    WHERE target = ? AND voter_id = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (target, voter_id),
-                )
+                if target_user_id is not None:
+                    cur = conn.execute(
+                        """
+                        SELECT id, created_at, label
+                        FROM votes
+                        WHERE target_user_id = ? AND voter_id = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (target_user_id, voter_id),
+                    )
+                else:
+                    cur = conn.execute(
+                        """
+                        SELECT id, created_at, label
+                        FROM votes
+                        WHERE target = ? AND voter_id = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (target, voter_id),
+                    )
                 row = cur.fetchone()
                 if not row:
                     conn.execute(
-                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
+                        "INSERT INTO votes (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (target, target_user_id, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                     )
                     return "inserted"
 
@@ -427,6 +554,8 @@ def add_vote(
                         """
                         UPDATE votes
                         SET label = ?,
+                            target = ?,
+                            target_user_id = ?,
                             tone = ?,
                             speed = ?,
                             contact_format = ?,
@@ -442,7 +571,7 @@ def add_vote(
                             created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
-                        ("feedback", tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
+                        ("feedback", target, target_user_id, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                     )
                     return "inserted"
 
@@ -456,6 +585,8 @@ def add_vote(
                         """
                         UPDATE votes
                         SET label = ?,
+                            target = ?,
+                            target_user_id = ?,
                             tone = ?,
                             speed = ?,
                             contact_format = ?,
@@ -471,7 +602,7 @@ def add_vote(
                             created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
-                        (label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
+                        (label, target, target_user_id, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                     )
                     return "updated"
 
@@ -496,8 +627,10 @@ def upsert_user_with_flag(
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (user_id,))
-                    existed = cur.fetchone() is not None
+                    cur.execute("SELECT username FROM users WHERE user_id = %s LIMIT 1", (user_id,))
+                    prev_row = cur.fetchone()
+                    existed = prev_row is not None
+                    prev_username = str(prev_row[0]).lower() if prev_row and prev_row[0] else ""
                     cur.execute(
                         "DELETE FROM users WHERE LOWER(username) = LOWER(%s) AND user_id <> %s",
                         (username, user_id),
@@ -516,6 +649,27 @@ def upsert_user_with_flag(
                         """,
                         (user_id, username, first_name, last_name, photo_url, app_user),
                     )
+                    aliases = [username]
+                    if prev_username and prev_username not in aliases:
+                        aliases.append(prev_username)
+                    cur.execute(
+                        """
+                        UPDATE votes
+                        SET target_user_id = %s
+                        WHERE LOWER(target) = ANY(%s)
+                          AND (target_user_id IS NULL OR target_user_id = %s)
+                        """,
+                        (user_id, aliases, user_id),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE ref_visits
+                        SET target_user_id = %s
+                        WHERE LOWER(target) = ANY(%s)
+                          AND (target_user_id IS NULL OR target_user_id = %s)
+                        """,
+                        (user_id, aliases, user_id),
+                    )
                     conn.commit()
                     return not existed
             finally:
@@ -527,8 +681,10 @@ def upsert_user_with_flag(
         conn = _get_sqlite_conn()
         try:
             with conn:
-                cur = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (user_id,))
-                existed = cur.fetchone() is not None
+                cur = conn.execute("SELECT username FROM users WHERE user_id = ? LIMIT 1", (user_id,))
+                prev_row = cur.fetchone()
+                existed = prev_row is not None
+                prev_username = str(prev_row[0]).lower() if prev_row and prev_row[0] else ""
                 conn.execute(
                     "DELETE FROM users WHERE LOWER(username) = LOWER(?) AND user_id <> ?",
                     (username, user_id),
@@ -549,6 +705,28 @@ def upsert_user_with_flag(
                         updated_at = CURRENT_TIMESTAMP
                     """,
                     (user_id, username, first_name, last_name, photo_url, 1 if app_user else 0),
+                )
+                aliases = [username]
+                if prev_username and prev_username not in aliases:
+                    aliases.append(prev_username)
+                alias_marks = ",".join("?" for _ in aliases)
+                conn.execute(
+                    f"""
+                    UPDATE votes
+                    SET target_user_id = ?
+                    WHERE LOWER(target) IN ({alias_marks})
+                      AND (target_user_id IS NULL OR target_user_id = ?)
+                    """,
+                    (user_id, *aliases, user_id),
+                )
+                conn.execute(
+                    f"""
+                    UPDATE ref_visits
+                    SET target_user_id = ?
+                    WHERE LOWER(target) IN ({alias_marks})
+                      AND (target_user_id IS NULL OR target_user_id = ?)
+                    """,
+                    (user_id, *aliases, user_id),
                 )
                 return not existed
         finally:
@@ -770,15 +948,15 @@ def normalize_case_data() -> tuple[int, int]:
     return users_merged, rows_lowercased
 
 
-def add_ref_visit(target: str, visitor_id: int) -> bool:
+def add_ref_visit(target: str, visitor_id: int, target_user_id: Optional[int] = None) -> bool:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "INSERT INTO ref_visits (target, visitor_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                        (target, visitor_id),
+                        "INSERT INTO ref_visits (target, target_user_id, visitor_id) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        (target, target_user_id, visitor_id),
                     )
                     inserted = cur.rowcount > 0
                     conn.commit()
@@ -793,24 +971,24 @@ def add_ref_visit(target: str, visitor_id: int) -> bool:
         try:
             with conn:
                 cur = conn.execute(
-                    "INSERT OR IGNORE INTO ref_visits (target, visitor_id) VALUES (?, ?)",
-                    (target, visitor_id),
+                    "INSERT OR IGNORE INTO ref_visits (target, target_user_id, visitor_id) VALUES (?, ?, ?)",
+                    (target, target_user_id, visitor_id),
                 )
                 return (cur.rowcount or 0) > 0
         finally:
             conn.close()
 
 
-def count_ref_visitors(target: str) -> int:
+def count_ref_visitors(target: str, target_user_id: Optional[int] = None) -> int:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM ref_visits WHERE target = %s",
-                        (target,),
-                    )
+                    if target_user_id is not None:
+                        cur.execute("SELECT COUNT(*) FROM ref_visits WHERE target_user_id = %s", (target_user_id,))
+                    else:
+                        cur.execute("SELECT COUNT(*) FROM ref_visits WHERE target = %s", (target,))
                     total = cur.fetchone()[0]
             finally:
                 conn.close()
@@ -820,17 +998,94 @@ def count_ref_visitors(target: str) -> int:
     else:
         conn = _get_sqlite_conn()
         try:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM ref_visits WHERE target = ?",
-                (target,),
-            )
+            if target_user_id is not None:
+                cur = conn.execute("SELECT COUNT(*) FROM ref_visits WHERE target_user_id = ?", (target_user_id,))
+            else:
+                cur = conn.execute("SELECT COUNT(*) FROM ref_visits WHERE target = ?", (target,))
             total = cur.fetchone()[0]
         finally:
             conn.close()
     return int(total)
 
 
-def mark_seen_hint_sent(target: str, watcher_id: int) -> bool:
+def count_ref_answerers(target: str, target_user_id: Optional[int] = None) -> int:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    if target_user_id is not None:
+                        cur.execute(
+                            """
+                            SELECT COUNT(DISTINCT v.voter_id)
+                            FROM votes v
+                            JOIN ref_visits r
+                              ON r.target_user_id = v.target_user_id
+                             AND r.visitor_id = v.voter_id
+                            WHERE v.target_user_id = %s
+                              AND v.label = 'feedback'
+                              AND v.voter_id IS NOT NULL
+                            """,
+                            (target_user_id,),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT COUNT(DISTINCT v.voter_id)
+                            FROM votes v
+                            JOIN ref_visits r
+                              ON r.target = v.target
+                             AND r.visitor_id = v.voter_id
+                            WHERE v.target = %s
+                              AND v.label = 'feedback'
+                              AND v.voter_id IS NOT NULL
+                            """,
+                            (target,),
+                        )
+                    total = cur.fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB count_ref_answerers failed: %s", exc)
+            return 0
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            if target_user_id is not None:
+                cur = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT v.voter_id)
+                    FROM votes v
+                    JOIN ref_visits r
+                      ON r.target_user_id = v.target_user_id
+                     AND r.visitor_id = v.voter_id
+                    WHERE v.target_user_id = ?
+                      AND v.label = 'feedback'
+                      AND v.voter_id IS NOT NULL
+                    """,
+                    (target_user_id,),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT v.voter_id)
+                    FROM votes v
+                    JOIN ref_visits r
+                      ON r.target = v.target
+                     AND r.visitor_id = v.voter_id
+                    WHERE v.target = ?
+                      AND v.label = 'feedback'
+                      AND v.voter_id IS NOT NULL
+                    """,
+                    (target,),
+                )
+            total = cur.fetchone()[0]
+        finally:
+            conn.close()
+    return int(total or 0)
+
+
+def count_pushes_today(user_id: int) -> int:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
@@ -838,32 +1093,60 @@ def mark_seen_hint_sent(target: str, watcher_id: int) -> bool:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO seen_hints (target, watcher_id)
-                        VALUES (%s, %s)
-                        ON CONFLICT DO NOTHING
+                        SELECT COUNT(*)
+                        FROM push_events
+                        WHERE user_id = %s
+                          AND created_at::date = CURRENT_DATE
                         """,
-                        (target, watcher_id),
+                        (user_id,),
                     )
-                    inserted = cur.rowcount > 0
-                    conn.commit()
-                return inserted
+                    total = cur.fetchone()[0]
             finally:
                 conn.close()
         except Exception as exc:
-            logging.warning("DB mark_seen_hint_sent failed: %s", exc)
-            return False
+            logging.warning("DB count_pushes_today failed: %s", exc)
+            return 0
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM push_events
+                WHERE user_id = ?
+                  AND date(created_at) = date('now', 'localtime')
+                """,
+                (user_id,),
+            )
+            total = cur.fetchone()[0]
+        finally:
+            conn.close()
+    return int(total or 0)
+
+
+def add_push_event(user_id: int, event_type: str) -> None:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO push_events (user_id, event_type) VALUES (%s, %s)",
+                        (user_id, event_type),
+                    )
+                    conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB add_push_event failed: %s", exc)
     else:
         conn = _get_sqlite_conn()
         try:
             with conn:
-                cur = conn.execute(
-                    """
-                    INSERT OR IGNORE INTO seen_hints (target, watcher_id)
-                    VALUES (?, ?)
-                    """,
-                    (target, watcher_id),
+                conn.execute(
+                    "INSERT INTO push_events (user_id, event_type) VALUES (?, ?)",
+                    (user_id, event_type),
                 )
-                return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -894,16 +1177,16 @@ def get_user_id_by_username(username: str) -> Optional[int]:
     return int(row[0])
 
 
-def get_total(target: str) -> int:
+def get_total(target: str, target_user_id: Optional[int] = None) -> int:
     if USE_POSTGRES:
         try:
             conn = _get_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM votes WHERE target = %s AND label = 'feedback'",
-                        (target,),
-                    )
+                    if target_user_id is not None:
+                        cur.execute("SELECT COUNT(*) FROM votes WHERE target_user_id = %s AND label = 'feedback'", (target_user_id,))
+                    else:
+                        cur.execute("SELECT COUNT(*) FROM votes WHERE target = %s AND label = 'feedback'", (target,))
                     total = cur.fetchone()[0]
             finally:
                 conn.close()
@@ -913,10 +1196,10 @@ def get_total(target: str) -> int:
     else:
         conn = _get_sqlite_conn()
         try:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM votes WHERE target = ? AND label = 'feedback'",
-                (target,),
-            )
+            if target_user_id is not None:
+                cur = conn.execute("SELECT COUNT(*) FROM votes WHERE target_user_id = ? AND label = 'feedback'", (target_user_id,))
+            else:
+                cur = conn.execute("SELECT COUNT(*) FROM votes WHERE target = ? AND label = 'feedback'", (target,))
             total = cur.fetchone()[0]
         finally:
             conn.close()
@@ -1131,49 +1414,6 @@ def search_users(query: str, limit: int = 20) -> List[str]:
     return [str(row[0]) for row in rows]
 
 
-def list_recent_targets_for_voter(voter_id: int, limit: int = 20) -> List[str]:
-    if USE_POSTGRES:
-        try:
-            conn = _get_pg_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT target
-                        FROM votes
-                        WHERE voter_id = %s AND label = 'feedback'
-                        GROUP BY target
-                        ORDER BY MAX(created_at) DESC
-                        LIMIT %s
-                        """,
-                        (voter_id, limit),
-                    )
-                    rows = cur.fetchall()
-            finally:
-                conn.close()
-        except Exception as exc:
-            logging.warning("DB list_recent_targets_for_voter failed: %s", exc)
-            return []
-    else:
-        conn = _get_sqlite_conn()
-        try:
-            cur = conn.execute(
-                """
-                SELECT target
-                FROM votes
-                WHERE voter_id = ? AND label = 'feedback'
-                GROUP BY target
-                ORDER BY MAX(created_at) DESC
-                LIMIT ?
-                """,
-                (voter_id, limit),
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-    return [str(row[0]) for row in rows]
-
-
 def get_username_by_user_id(user_id: int) -> Optional[str]:
     if USE_POSTGRES:
         try:
@@ -1220,7 +1460,7 @@ def delete_user_by_user_id(user_id: int) -> None:
             conn.close()
 
 
-def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
+def get_contact_dimensions(target: str, target_user_id: Optional[int] = None) -> dict[str, dict[str, int]]:
     fields = {
         "tone": ("easy", "serious"),
         "speed": ("fast", "slow"),
@@ -1245,10 +1485,16 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
             try:
                 with conn.cursor() as cur:
                     for field, options in fields.items():
-                        cur.execute(
-                            f"SELECT {field}, COUNT(*) FROM votes WHERE target = %s AND label = 'feedback' GROUP BY {field}",
-                            (target,),
-                        )
+                        if target_user_id is not None:
+                            cur.execute(
+                                f"SELECT {field}, COUNT(*) FROM votes WHERE target_user_id = %s AND label = 'feedback' GROUP BY {field}",
+                                (target_user_id,),
+                            )
+                        else:
+                            cur.execute(
+                                f"SELECT {field}, COUNT(*) FROM votes WHERE target = %s AND label = 'feedback' GROUP BY {field}",
+                                (target,),
+                            )
                         for value, cnt in cur.fetchall():
                             if value in options:
                                 result[field][str(value)] = int(cnt)
@@ -1261,10 +1507,16 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
         conn = _get_sqlite_conn()
         try:
             for field, options in fields.items():
-                cur = conn.execute(
-                    f"SELECT {field}, COUNT(*) FROM votes WHERE target = ? AND label = 'feedback' GROUP BY {field}",
-                    (target,),
-                )
+                if target_user_id is not None:
+                    cur = conn.execute(
+                        f"SELECT {field}, COUNT(*) FROM votes WHERE target_user_id = ? AND label = 'feedback' GROUP BY {field}",
+                        (target_user_id,),
+                    )
+                else:
+                    cur = conn.execute(
+                        f"SELECT {field}, COUNT(*) FROM votes WHERE target = ? AND label = 'feedback' GROUP BY {field}",
+                        (target,),
+                    )
                 for value, cnt in cur.fetchall():
                     if value in options:
                         result[field][str(value)] = int(cnt)
