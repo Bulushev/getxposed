@@ -38,6 +38,14 @@ def init_db() -> bool:
                             speed TEXT DEFAULT 'slow',
                             contact_format TEXT DEFAULT 'text',
                             caution TEXT DEFAULT 'false',
+                            initiative TEXT DEFAULT 'wait',
+                            start_context TEXT DEFAULT 'topic',
+                            attention_reaction TEXT DEFAULT 'careful',
+                            frequency TEXT DEFAULT 'rare',
+                            comm_format TEXT DEFAULT 'reserved',
+                            emotion_tone TEXT DEFAULT 'neutral',
+                            feedback_style TEXT DEFAULT 'soft',
+                            uncertainty TEXT DEFAULT 'high',
                             voter_id BIGINT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
@@ -47,6 +55,14 @@ def init_db() -> bool:
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS speed TEXT DEFAULT 'slow'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS contact_format TEXT DEFAULT 'text'")
                     cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS caution TEXT DEFAULT 'false'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS initiative TEXT DEFAULT 'wait'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS start_context TEXT DEFAULT 'topic'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS attention_reaction TEXT DEFAULT 'careful'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS frequency TEXT DEFAULT 'rare'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS comm_format TEXT DEFAULT 'reserved'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS emotion_tone TEXT DEFAULT 'neutral'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS feedback_style TEXT DEFAULT 'soft'")
+                    cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS uncertainty TEXT DEFAULT 'high'")
                     cur.execute(
                         """
                         CREATE TABLE IF NOT EXISTS users (
@@ -97,6 +113,15 @@ def init_db() -> bool:
                         ON ref_visits (target, visitor_id)
                         """
                     )
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS profile_prefs (
+                            user_id BIGINT PRIMARY KEY,
+                            note TEXT DEFAULT '',
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -117,6 +142,14 @@ def init_db() -> bool:
                         speed TEXT DEFAULT 'slow',
                         contact_format TEXT DEFAULT 'text',
                         caution TEXT DEFAULT 'false',
+                        initiative TEXT DEFAULT 'wait',
+                        start_context TEXT DEFAULT 'topic',
+                        attention_reaction TEXT DEFAULT 'careful',
+                        frequency TEXT DEFAULT 'rare',
+                        comm_format TEXT DEFAULT 'reserved',
+                        emotion_tone TEXT DEFAULT 'neutral',
+                        feedback_style TEXT DEFAULT 'soft',
+                        uncertainty TEXT DEFAULT 'high',
                         voter_id INTEGER,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -136,6 +169,38 @@ def init_db() -> bool:
                 pass
             try:
                 conn.execute("ALTER TABLE votes ADD COLUMN caution TEXT DEFAULT 'false'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN initiative TEXT DEFAULT 'wait'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN start_context TEXT DEFAULT 'topic'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN attention_reaction TEXT DEFAULT 'careful'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN frequency TEXT DEFAULT 'rare'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN comm_format TEXT DEFAULT 'reserved'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN emotion_tone TEXT DEFAULT 'neutral'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN feedback_style TEXT DEFAULT 'soft'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE votes ADD COLUMN uncertainty TEXT DEFAULT 'high'")
             except sqlite3.OperationalError:
                 pass
             conn.execute(
@@ -200,6 +265,15 @@ def init_db() -> bool:
                 ON ref_visits (target, visitor_id)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS profile_prefs (
+                    user_id INTEGER PRIMARY KEY,
+                    note TEXT DEFAULT '',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             conn.commit()
         finally:
             conn.close()
@@ -214,6 +288,14 @@ def add_vote(
     speed: str = "slow",
     contact_format: str = "text",
     caution: str = "false",
+    initiative: str = "wait",
+    start_context: str = "topic",
+    attention_reaction: str = "careful",
+    frequency: str = "rare",
+    comm_format: str = "reserved",
+    emotion_tone: str = "neutral",
+    feedback_style: str = "soft",
+    uncertainty: str = "high",
 ) -> Optional[str]:
     cooldown = timedelta(hours=24)
 
@@ -224,8 +306,8 @@ def add_vote(
                 with conn.cursor() as cur:
                     if voter_id is None:
                         cur.execute(
-                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                            (target, label, tone, speed, contact_format, caution, voter_id),
+                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                         )
                         conn.commit()
                         return "inserted"
@@ -243,8 +325,8 @@ def add_vote(
                     row = cur.fetchone()
                     if not row:
                         cur.execute(
-                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                            (target, label, tone, speed, contact_format, caution, voter_id),
+                            "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                         )
                         conn.commit()
                         return "inserted"
@@ -261,10 +343,18 @@ def add_vote(
                                 speed = %s,
                                 contact_format = %s,
                                 caution = %s,
+                                initiative = %s,
+                                start_context = %s,
+                                attention_reaction = %s,
+                                frequency = %s,
+                                comm_format = %s,
+                                emotion_tone = %s,
+                                feedback_style = %s,
+                                uncertainty = %s,
                                 created_at = CURRENT_TIMESTAMP
                             WHERE id = %s
                             """,
-                            ("feedback", tone, speed, contact_format, caution, vote_id),
+                            ("feedback", tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                         )
                         conn.commit()
                         return "inserted"
@@ -278,10 +368,18 @@ def add_vote(
                                 speed = %s,
                                 contact_format = %s,
                                 caution = %s,
+                                initiative = %s,
+                                start_context = %s,
+                                attention_reaction = %s,
+                                frequency = %s,
+                                comm_format = %s,
+                                emotion_tone = %s,
+                                feedback_style = %s,
+                                uncertainty = %s,
                                 created_at = CURRENT_TIMESTAMP
                             WHERE id = %s
                             """,
-                            (label, tone, speed, contact_format, caution, vote_id),
+                            (label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                         )
                         conn.commit()
                         return "updated"
@@ -298,8 +396,8 @@ def add_vote(
             with conn:
                 if voter_id is None:
                     conn.execute(
-                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (target, label, tone, speed, contact_format, caution, voter_id),
+                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                     )
                     return "inserted"
 
@@ -316,8 +414,8 @@ def add_vote(
                 row = cur.fetchone()
                 if not row:
                     conn.execute(
-                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (target, label, tone, speed, contact_format, caution, voter_id),
+                        "INSERT INTO votes (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (target, label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, voter_id),
                     )
                     return "inserted"
 
@@ -333,10 +431,18 @@ def add_vote(
                             speed = ?,
                             contact_format = ?,
                             caution = ?,
+                            initiative = ?,
+                            start_context = ?,
+                            attention_reaction = ?,
+                            frequency = ?,
+                            comm_format = ?,
+                            emotion_tone = ?,
+                            feedback_style = ?,
+                            uncertainty = ?,
                             created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
-                        ("feedback", tone, speed, contact_format, caution, vote_id),
+                        ("feedback", tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                     )
                     return "inserted"
 
@@ -354,10 +460,18 @@ def add_vote(
                             speed = ?,
                             contact_format = ?,
                             caution = ?,
+                            initiative = ?,
+                            start_context = ?,
+                            attention_reaction = ?,
+                            frequency = ?,
+                            comm_format = ?,
+                            emotion_tone = ?,
+                            feedback_style = ?,
+                            uncertainty = ?,
                             created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
-                        (label, tone, speed, contact_format, caution, vote_id),
+                        (label, tone, speed, contact_format, caution, initiative, start_context, attention_reaction, frequency, comm_format, emotion_tone, feedback_style, uncertainty, vote_id),
                     )
                     return "updated"
 
@@ -498,6 +612,69 @@ def get_user_public_by_username(username: str) -> Optional[dict]:
         "photo_url": str(row[4] or ""),
         "app_user": bool(row[5]),
     }
+
+
+def get_profile_note(user_id: int) -> str:
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT note FROM profile_prefs WHERE user_id = %s LIMIT 1", (user_id,))
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB get_profile_note failed: %s", exc)
+            return ""
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            cur = conn.execute("SELECT note FROM profile_prefs WHERE user_id = ? LIMIT 1", (user_id,))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+    return str(row[0] or "") if row else ""
+
+
+def set_profile_note(user_id: int, note: str) -> None:
+    note = str(note or "")
+    if USE_POSTGRES:
+        try:
+            conn = _get_pg_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO profile_prefs (user_id, note, updated_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            note = EXCLUDED.note,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (user_id, note),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logging.warning("DB set_profile_note failed: %s", exc)
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO profile_prefs (user_id, note, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        note = excluded.note,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, note),
+                )
+        finally:
+            conn.close()
 
 
 def normalize_case_data() -> tuple[int, int]:
@@ -1048,7 +1225,15 @@ def get_contact_dimensions(target: str) -> dict[str, dict[str, int]]:
         "tone": ("easy", "serious"),
         "speed": ("fast", "slow"),
         "contact_format": ("text", "live"),
+        "initiative": ("self", "wait"),
+        "start_context": ("topic", "direct"),
+        "attention_reaction": ("likes", "careful"),
         "caution": ("true", "false"),
+        "frequency": ("often", "rare"),
+        "comm_format": ("informal", "reserved"),
+        "emotion_tone": ("warm", "neutral"),
+        "feedback_style": ("direct", "soft"),
+        "uncertainty": ("low", "high"),
     }
     result: dict[str, dict[str, int]] = {
         key: {option: 0 for option in options} for key, options in fields.items()

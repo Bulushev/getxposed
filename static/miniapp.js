@@ -7,9 +7,20 @@
   const authStatus = document.getElementById("authStatus");
   const profileLink = document.getElementById("profileLink");
   const copyLink = document.getElementById("copyLink");
+  const editProfileBtn = document.getElementById("editProfileBtn");
+  const profileEditor = document.getElementById("profileEditor");
+  const profileNoteInput = document.getElementById("profileNoteInput");
+  const saveProfileBtn = document.getElementById("saveProfileBtn");
+  const cancelProfileBtn = document.getElementById("cancelProfileBtn");
   const summaryBubble = document.getElementById("summaryBubble");
   const summaryNotes = document.getElementById("summaryNotes");
+  const answersBlock = document.getElementById("answersBlock");
+  const answersList = document.getElementById("answersList");
+  const answersTitle = document.getElementById("answersTitle");
+  const profileNote = document.getElementById("profileNote");
   const profileName = document.getElementById("profileName");
+  const profileHeadLink = document.querySelector(".profile-head");
+  const profilePresence = document.getElementById("profilePresence");
   const avatarImg = document.getElementById("avatarImg");
   const avatarFallback = document.getElementById("avatarFallback");
   const chipTone = document.getElementById("chipTone");
@@ -18,7 +29,22 @@
   const copyToast = document.getElementById("copyToast");
 
   const answerStatus = document.getElementById("answerStatus");
+  const answerTargetHead = document.getElementById("answerTargetHead");
   const answerTargetTitle = document.getElementById("answerTargetTitle");
+  const answerTargetAvatar = document.getElementById("answerTargetAvatar");
+  const answerTargetAvatarImg = document.getElementById("answerTargetAvatarImg");
+  const answerTargetAvatarFallback = document.getElementById("answerTargetAvatarFallback");
+  const answerProgress = document.getElementById("answerProgress");
+  const answerProgressBar = document.getElementById("answerProgressBar");
+  const answerIntro = document.getElementById("answerIntro");
+  const answerHint = document.getElementById("answerHint");
+  const answerBackBtn = document.getElementById("answerBackBtn");
+  const swipeCard = document.getElementById("swipeCard");
+  const swipeTitle = document.getElementById("swipeTitle");
+  const swipeLeft = document.getElementById("swipeLeft");
+  const swipeRight = document.getElementById("swipeRight");
+  const swipeBadgeLeft = document.getElementById("swipeBadgeLeft");
+  const swipeBadgeRight = document.getElementById("swipeBadgeRight");
   const sendAnswerBtn = document.getElementById("sendAnswer");
   const targetInput = document.getElementById("target");
   const userSuggestions = document.getElementById("userSuggestions");
@@ -37,7 +63,12 @@
     tone: "",
     speed: "",
     contact_format: "",
+    initiative: "",
+    start_context: "",
+    attention_reaction: "",
     caution: "",
+    frequency: "",
+    comm_format: "",
   };
   let showingForeignProfile = false;
   let ownProfileLink = "";
@@ -46,7 +77,22 @@
   let foreignProfileUsername = "";
   let answerFlowTarget = "";
   let answerFlowStep = -1;
-  const ANSWER_FIELDS = ["tone", "speed", "contact_format", "caution"];
+  let currentProfileUsername = "";
+  const ANSWER_FIELDS = [
+    "tone",
+    "speed",
+    "contact_format",
+    "initiative",
+    "start_context",
+    "attention_reaction",
+    "caution",
+    "frequency",
+    "comm_format",
+  ];
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let swipeStarted = false;
+  let swipeLocked = false;
 
   function setTab(name) {
     profileBlock.style.display = name === "profile" ? "block" : "none";
@@ -69,6 +115,11 @@
 
   function updateShareState() {
     if (!copyLink) return;
+    if (editProfileBtn) {
+      editProfileBtn.style.display = showingForeignProfile ? "none" : "inline-flex";
+    }
+    if (profileEditor) profileEditor.style.display = "none";
+
     if (showingForeignProfile && foreignProfileIsAppUser) {
       copyLink.disabled = true;
       copyLink.textContent = "Поделиться";
@@ -85,6 +136,13 @@
       copyLink.textContent = "Поделиться";
       copyLink.title = "";
     }
+  }
+
+  function updateAnswersTitle() {
+    if (!answersTitle) return;
+    answersTitle.textContent = showingForeignProfile
+      ? "Как обычно воспринимают этого человека"
+      : "Как тебя обычно воспринимают";
   }
 
   tabProfile.addEventListener("click", async () => {
@@ -119,6 +177,7 @@
       // Allow changing already opened steps; block only steps not opened yet.
       if (groupIndex < 0 || groupIndex > answerFlowStep) return;
       selected[field] = value;
+      updateAnswerProgress();
       document.querySelectorAll(`.choice-btn[data-field="${field}"]`).forEach((b) => {
         b.classList.toggle("active", b === btn);
       });
@@ -127,6 +186,128 @@
       }
     });
   });
+
+  function getVisibleChoiceRow() {
+    const active = choiceGroups.find((g) => g.classList.contains("visible"));
+    if (!active) return null;
+    return active.querySelector(".choice-row");
+  }
+
+  function setSwipeBadges(dx) {
+    if (!swipeCard || !swipeBadgeLeft || !swipeBadgeRight) return;
+    const strength = Math.min(1, Math.abs(dx) / 120);
+    swipeCard.classList.toggle("swipe-left", dx < -24);
+    swipeCard.classList.toggle("swipe-right", dx > 24);
+    swipeBadgeLeft.style.opacity = dx < 0 ? String(strength) : "0";
+    swipeBadgeRight.style.opacity = dx > 0 ? String(strength) : "0";
+    swipeBadgeLeft.style.transform = dx < 0 ? "scale(1)" : "scale(.92)";
+    swipeBadgeRight.style.transform = dx > 0 ? "scale(1)" : "scale(.92)";
+  }
+
+  function resetSwipeCardVisual(animated = true) {
+    if (!swipeCard) return;
+    swipeCard.style.transition = animated ? "transform .18s ease" : "none";
+    swipeCard.style.transform = "translateX(0px) rotate(0deg)";
+    swipeCard.classList.remove("swipe-left", "swipe-right");
+    if (swipeBadgeLeft) swipeBadgeLeft.style.opacity = "0";
+    if (swipeBadgeRight) swipeBadgeRight.style.opacity = "0";
+    if (swipeBadgeLeft) swipeBadgeLeft.style.transform = "scale(.92)";
+    if (swipeBadgeRight) swipeBadgeRight.style.transform = "scale(.92)";
+  }
+
+  function pickByDirection(direction) {
+    const row = getVisibleChoiceRow();
+    if (!row) return;
+    const options = row.querySelectorAll(".choice-btn");
+    if (!options || options.length < 2) return;
+    if (direction < 0) {
+      options[0].click();
+    } else {
+      options[1].click();
+    }
+  }
+
+  function animateAndPick(direction) {
+    if (!swipeCard || swipeLocked) return;
+    swipeLocked = true;
+    const outX = direction < 0 ? -Math.max(window.innerWidth, 420) : Math.max(window.innerWidth, 420);
+    const rotate = direction < 0 ? -14 : 14;
+    swipeCard.style.transition = "transform .22s cubic-bezier(.2,.8,.2,1)";
+    swipeCard.style.transform = `translateX(${outX}px) rotate(${rotate}deg)`;
+    setTimeout(() => {
+      resetSwipeCardVisual(false);
+      pickByDirection(direction);
+      swipeLocked = false;
+    }, 220);
+  }
+
+  function applyDrag(dx, dy) {
+    if (!swipeCard || swipeLocked) return;
+    if (Math.abs(dy) > Math.abs(dx)) return;
+    const rotate = Math.max(-12, Math.min(12, dx / 14));
+    swipeCard.style.transition = "none";
+    swipeCard.style.transform = `translateX(${dx}px) rotate(${rotate}deg)`;
+    setSwipeBadges(dx);
+  }
+
+  function finishDrag(dx, dy) {
+    if (swipeLocked) return;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      resetSwipeCardVisual(true);
+      return;
+    }
+    if (Math.abs(dx) < 72) {
+      resetSwipeCardVisual(true);
+      return;
+    }
+    animateAndPick(dx < 0 ? -1 : 1);
+  }
+
+  if (swipeCard) {
+    swipeCard.addEventListener("touchstart", (event) => {
+      if (!event.touches || event.touches.length !== 1 || swipeLocked) return;
+      swipeStarted = true;
+      swipeStartX = event.touches[0].clientX;
+      swipeStartY = event.touches[0].clientY;
+    }, { passive: true });
+
+    swipeCard.addEventListener("touchmove", (event) => {
+      if (!swipeStarted || !event.touches || !event.touches.length) return;
+      const dx = event.touches[0].clientX - swipeStartX;
+      const dy = event.touches[0].clientY - swipeStartY;
+      applyDrag(dx, dy);
+    }, { passive: true });
+
+    swipeCard.addEventListener("touchend", (event) => {
+      if (!swipeStarted || !event.changedTouches || !event.changedTouches.length) return;
+      swipeStarted = false;
+      const dx = event.changedTouches[0].clientX - swipeStartX;
+      const dy = event.changedTouches[0].clientY - swipeStartY;
+      finishDrag(dx, dy);
+    }, { passive: true });
+
+    swipeCard.addEventListener("mousedown", (event) => {
+      if (swipeLocked) return;
+      swipeStarted = true;
+      swipeStartX = event.clientX;
+      swipeStartY = event.clientY;
+    });
+
+    window.addEventListener("mousemove", (event) => {
+      if (!swipeStarted) return;
+      const dx = event.clientX - swipeStartX;
+      const dy = event.clientY - swipeStartY;
+      applyDrag(dx, dy);
+    });
+
+    window.addEventListener("mouseup", (event) => {
+      if (!swipeStarted) return;
+      swipeStarted = false;
+      const dx = event.clientX - swipeStartX;
+      const dy = event.clientY - swipeStartY;
+      finishDrag(dx, dy);
+    });
+  }
 
   async function api(path, options) {
     const res = await fetch(path, {
@@ -163,21 +344,7 @@
       );
     }
 
-    const rec = recommendationText(d.recommendation);
-    let text =
-      "Как к тебе проще начать общение\n\n" +
-      rec.toneEmoji +
-      " " +
-      rec.toneText +
-      "\n" +
-      rec.speedEmoji +
-      " " +
-      rec.speedText +
-      "\n" +
-      rec.formatEmoji +
-      " " +
-      rec.formatText;
-    return text;
+    return "Как к тебе проще начать общение\n\nСобрали полную картину по карточкам ниже.";
   }
 
   function setAvatar(user) {
@@ -185,6 +352,7 @@
     const firstName = user && user.first_name ? String(user.first_name).trim() : "";
     const lastName = user && user.last_name ? String(user.last_name).trim() : "";
     const usernameRaw = user && user.username ? String(user.username).replace(/^@/, "") : "";
+    currentProfileUsername = usernameRaw ? usernameRaw.toLowerCase() : "";
     const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
     if (fullName) {
       profileName.textContent = fullName;
@@ -220,16 +388,38 @@
     }
   }
 
+  function openTelegramProfile(username) {
+    const uname = String(username || "").replace(/^@/, "").trim();
+    if (!uname) {
+      showCopyToast("Не удалось открыть профиль: нет username.");
+      return;
+    }
+    const url = "https://t.me/" + uname;
+    if (tg && typeof tg.openTelegramLink === "function") {
+      tg.openTelegramLink(url);
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   function renderProfile(d) {
     profileLink.textContent = d.link || "—";
     inviteLink = d.invite_link || inviteLink;
+    if (profilePresence) {
+      profilePresence.style.display = d.is_app_user ? "inline-flex" : "none";
+    }
 
     setAvatar(d.user || {});
-    summaryBubble.textContent = buildSummaryText(d);
+    const noteText = String(d.profile_note || "").trim();
+    summaryBubble.textContent = noteText || buildSummaryText(d);
     const notes = [];
     if (d.caution_block) notes.push("⚠️ иногда лучше не давить");
     if (d.uncertain_block) notes.push("ℹ️ по некоторым пунктам мнения расходятся");
     summaryNotes.textContent = notes.join("\n");
+    if (profileNote) {
+      profileNote.style.display = "none";
+      profileNote.textContent = "";
+    }
 
     if (d.enough && d.recommendation) {
       const rec = recommendationText(d.recommendation);
@@ -240,6 +430,56 @@
       chipTone.textContent = "❓";
       chipSpeed.textContent = "❓";
       chipFormat.textContent = "❓";
+    }
+
+    if (answersBlock && answersList) {
+      const cards = Array.isArray(d.answer_cards) ? d.answer_cards : [];
+      if (cards.length) {
+        const byId = {};
+        cards.forEach((c) => {
+          if (c && c.id) byId[c.id] = c;
+        });
+        const rows = [];
+        rows.push({
+          title: "Темп",
+          value: ((byId.tempo && byId.tempo.value) || (byId.frequency && byId.frequency.value) || "—"),
+        });
+        rows.push({
+          title: "Инициатива",
+          value: ((byId.pressure && byId.pressure.value) || (byId.initiative && byId.initiative.value) || "—"),
+        });
+        rows.push({
+          title: "Контакт",
+          value: ((byId.style && byId.style.value) || (byId.first_reaction && byId.first_reaction.value) || "—"),
+        });
+
+        const firstReaction = String((byId.first_reaction && byId.first_reaction.value) || "").toLowerCase();
+        if (firstReaction.includes("сначала смотрит")) {
+          rows.push({
+            title: "Дополнительно",
+            value: "ℹ️ реакции могут быть не сразу",
+          });
+        }
+
+        answersList.innerHTML = "";
+        rows.forEach((card) => {
+          const row = document.createElement("div");
+          row.className = "answers-item";
+          const title = document.createElement("div");
+          title.className = "answers-item-title";
+          title.textContent = card.title || "";
+          const value = document.createElement("div");
+          value.className = "answers-item-value";
+          value.textContent = card.value || "";
+          row.appendChild(title);
+          row.appendChild(value);
+          answersList.appendChild(row);
+        });
+        answersBlock.style.display = "block";
+      } else {
+        answersList.innerHTML = "";
+        answersBlock.style.display = "none";
+      }
     }
   }
 
@@ -253,6 +493,7 @@
       foreignProfileUsername = "";
       ownProfileLink = (resp.data && resp.data.link) || ownProfileLink;
       updateShareState();
+      updateAnswersTitle();
       authStatus.textContent = "";
     } catch (e) {
       summaryBubble.textContent = "Ошибка: " + e.message;
@@ -287,6 +528,7 @@
       showingForeignProfile = true;
       foreignProfileUsername = normalized;
       updateShareState();
+      updateAnswersTitle();
       authStatus.textContent = "Профиль " + normalized;
       setForeignProfileView();
     } catch (e) {
@@ -311,6 +553,47 @@
     });
   }
 
+  function updateAnswerProgress() {
+    if (!answerProgress || !answerProgressBar) return;
+    const total = ANSWER_FIELDS.length;
+    const done = ANSWER_FIELDS.filter((field) => Boolean(selected[field])).length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    answerProgressBar.style.width = pct + "%";
+  }
+
+  function getChoicePayload(stepIndex) {
+    if (stepIndex < 0 || stepIndex >= ANSWER_FIELDS.length) return null;
+    const group = choiceGroups[stepIndex];
+    if (!group) return null;
+    const title = ((group.querySelector(".choice-title") || {}).textContent || "").trim();
+    const buttons = group.querySelectorAll(".choice-btn");
+    if (!buttons || buttons.length < 2) return null;
+    const leftBtn = buttons[0];
+    const rightBtn = buttons[1];
+    const leftEm = ((leftBtn.querySelector(".em") || {}).textContent || "").trim();
+    const rightEm = ((rightBtn.querySelector(".em") || {}).textContent || "").trim();
+    const leftText = leftBtn.textContent.replace(leftEm, "").trim();
+    const rightText = rightBtn.textContent.replace(rightEm, "").trim();
+    return {
+      title,
+      left: { em: leftEm, text: leftText },
+      right: { em: rightEm, text: rightText },
+    };
+  }
+
+  function renderSwipeCard(stepIndex) {
+    if (!swipeCard || !swipeTitle || !swipeLeft || !swipeRight) return;
+    const payload = getChoicePayload(stepIndex);
+    if (!payload) {
+      swipeCard.style.display = "none";
+      return;
+    }
+    swipeTitle.textContent = payload.title;
+    swipeLeft.innerHTML = "<b>← влево</b>" + payload.left.em + " " + payload.left.text;
+    swipeRight.innerHTML = "<b>вправо →</b>" + payload.right.em + " " + payload.right.text;
+    swipeCard.style.display = "grid";
+  }
+
   function resetAnswerFlow() {
     answerFlowStep = -1;
     answerFlowTarget = "";
@@ -318,11 +601,26 @@
     choiceGroups.forEach((g) => g.classList.remove("visible"));
     sendAnswerBtn.style.display = "none";
     answerTargetTitle.textContent = "";
+    if (answerTargetHead) answerTargetHead.style.display = "none";
+    if (answerTargetAvatar) answerTargetAvatar.style.display = "none";
+    targetInput.style.display = "";
+    userSuggestions.style.display = "";
+    if (answerIntro) answerIntro.style.display = "";
+    if (answerHint) answerHint.style.display = "";
+    if (answerBackBtn) answerBackBtn.style.display = "none";
+    if (swipeCard) swipeCard.style.display = "none";
+    if (answerProgress) answerProgress.style.display = "none";
+    updateAnswerProgress();
+    resetSwipeCardVisual(false);
   }
 
   function revealStep(index) {
     if (index < 0 || index >= choiceGroups.length) return;
+    choiceGroups.forEach((g, i) => {
+      if (i !== index) g.classList.remove("visible");
+    });
     choiceGroups[index].classList.add("visible");
+    renderSwipeCard(index);
   }
 
   function revealNextAnswerStep() {
@@ -330,27 +628,69 @@
     if (next < choiceGroups.length) {
       answerFlowStep = next;
       revealStep(next);
+      sendAnswerBtn.style.display = next === (choiceGroups.length - 1) ? "block" : "none";
       return;
     }
     answerFlowStep = choiceGroups.length;
     sendAnswerBtn.style.display = "block";
   }
 
-  async function resolveTargetDisplayName(target) {
-    if (previewMode) return target;
+  async function resolveTargetDisplay(target) {
+    if (previewMode) {
+      return {
+        title: target,
+        avatar_url: "",
+        first_name: "",
+        username: target.replace(/^@/, ""),
+      };
+    }
     try {
       const resp = await api("/api/miniapp/profile?target=" + encodeURIComponent(target));
       const user = resp.data && resp.data.user ? resp.data.user : null;
-      if (!user) return target;
+      if (!user) {
+        return { title: target, avatar_url: "", first_name: "", username: target.replace(/^@/, "") };
+      }
       const fn = (user.first_name || "").trim();
       const ln = (user.last_name || "").trim();
       const full = [fn, ln].filter(Boolean).join(" ").trim();
-      if (full) return full;
-      if (user.username) return "@" + String(user.username).replace(/^@/, "");
-      return target;
+      return {
+        title: full || (user.username ? "@" + String(user.username).replace(/^@/, "") : target),
+        avatar_url: String(user.avatar_url || user.photo_url || ""),
+        first_name: fn,
+        username: String(user.username || target.replace(/^@/, "")),
+      };
     } catch (e) {
-      return target;
+      return { title: target, avatar_url: "", first_name: "", username: target.replace(/^@/, "") };
     }
+  }
+
+  function setAnswerTargetAvatar(display) {
+    if (!answerTargetAvatar || !answerTargetAvatarImg || !answerTargetAvatarFallback) return;
+    const username = String(display.username || "").replace(/^@/, "");
+    const fallbackLetter = (String(display.first_name || username || "?").trim().slice(0, 1) || "?").toUpperCase();
+    answerTargetAvatarFallback.textContent = fallbackLetter;
+    const fallbackPhoto = username ? "https://t.me/i/userpic/320/" + username + ".jpg" : "";
+    const candidates = [String(display.avatar_url || ""), fallbackPhoto].filter(Boolean);
+    if (!candidates.length) {
+      answerTargetAvatar.style.display = "block";
+      answerTargetAvatarImg.style.display = "none";
+      answerTargetAvatarFallback.style.display = "grid";
+      return;
+    }
+    let idx = 0;
+    answerTargetAvatar.style.display = "block";
+    answerTargetAvatarImg.style.display = "block";
+    answerTargetAvatarFallback.style.display = "none";
+    answerTargetAvatarImg.onerror = function () {
+      idx += 1;
+      if (idx >= candidates.length) {
+        answerTargetAvatarImg.style.display = "none";
+        answerTargetAvatarFallback.style.display = "grid";
+        return;
+      }
+      answerTargetAvatarImg.src = candidates[idx];
+    };
+    answerTargetAvatarImg.src = candidates[idx];
   }
 
   async function startAnswerFlow(rawTarget) {
@@ -363,8 +703,17 @@
     resetAnswerFlow();
     answerFlowTarget = target;
     answerStatus.textContent = "Подготовка...";
-    const displayName = await resolveTargetDisplayName(target);
-    answerTargetTitle.textContent = "Оставляем отзыв о " + displayName;
+    const display = await resolveTargetDisplay(target);
+    answerTargetTitle.textContent = "Оставляем ответ о " + display.title;
+    if (answerTargetHead) answerTargetHead.style.display = "flex";
+    setAnswerTargetAvatar(display);
+    targetInput.style.display = "none";
+    if (answerIntro) answerIntro.style.display = "none";
+    if (answerHint) answerHint.style.display = "none";
+    if (answerBackBtn) answerBackBtn.style.display = "block";
+    if (swipeCard) swipeCard.style.display = "grid";
+    if (answerProgress) answerProgress.style.display = "grid";
+    updateAnswerProgress();
     answerStatus.textContent = "";
     revealNextAnswerStep();
   }
@@ -405,7 +754,40 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "item";
-      btn.textContent = u;
+
+      const avatar = document.createElement("span");
+      avatar.className = "item-avatar";
+      const uname = u.replace(/^@/, "");
+      const fallback = document.createElement("span");
+      fallback.textContent = (uname.slice(0, 1) || "?").toUpperCase();
+      avatar.appendChild(fallback);
+
+      const img = document.createElement("img");
+      img.alt = uname;
+      const candidates = [
+        "/api/miniapp/avatar?username=" + encodeURIComponent(uname),
+        "https://t.me/i/userpic/320/" + encodeURIComponent(uname) + ".jpg",
+      ];
+      let idx = 0;
+      img.src = candidates[idx];
+      img.onerror = () => {
+        idx += 1;
+        if (idx >= candidates.length) {
+          if (img.parentNode) img.parentNode.removeChild(img);
+          return;
+        }
+        img.src = candidates[idx];
+      };
+      img.onload = () => {
+        fallback.style.display = "none";
+      };
+      avatar.appendChild(img);
+
+      const text = document.createElement("span");
+      text.textContent = u;
+
+      btn.appendChild(avatar);
+      btn.appendChild(text);
       btn.addEventListener("click", () => {
         insightTarget.value = u;
         addToLocalInsightHistory(u);
@@ -479,7 +861,7 @@
       answerStatus.textContent = "Нельзя оставлять отзывы о ботах.";
       return;
     }
-    if (!selected.tone || !selected.speed || !selected.contact_format || !selected.caution) {
+    if (ANSWER_FIELDS.some((field) => !selected[field])) {
       answerStatus.textContent = "Выбери все варианты перед отправкой.";
       return;
     }
@@ -488,7 +870,12 @@
       tone: selected.tone,
       speed: selected.speed,
       contact_format: selected.contact_format,
+      initiative: selected.initiative,
+      start_context: selected.start_context,
+      attention_reaction: selected.attention_reaction,
       caution: selected.caution,
+      frequency: selected.frequency,
+      comm_format: selected.comm_format,
     };
     try {
       addToLocalInsightHistory(payload.target);
@@ -502,6 +889,79 @@
       answerStatus.textContent = e.message;
     }
   });
+
+  if (answerBackBtn) {
+    answerBackBtn.addEventListener("click", () => {
+      targetInput.value = "";
+      answerStatus.textContent = "";
+      resetAnswerFlow();
+    });
+  }
+
+  if (editProfileBtn && profileEditor && profileNoteInput) {
+    editProfileBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (showingForeignProfile) return;
+      profileNoteInput.value = (profileNote && profileNote.textContent) ? profileNote.textContent : "";
+      profileEditor.style.display = "grid";
+      profileNoteInput.focus();
+    });
+  }
+
+  if (cancelProfileBtn && profileEditor) {
+    cancelProfileBtn.addEventListener("click", () => {
+      profileEditor.style.display = "none";
+    });
+  }
+
+  if (saveProfileBtn && profileEditor && profileNoteInput) {
+    saveProfileBtn.addEventListener("click", async () => {
+      const note = String(profileNoteInput.value || "").trim();
+      const lowered = note.toLowerCase();
+      if (
+        lowered.includes("http://") ||
+        lowered.includes("https://") ||
+        lowered.includes("www.") ||
+        lowered.includes("t.me/")
+      ) {
+        showCopyToast("Ссылки в описании запрещены.");
+        return;
+      }
+      try {
+        await api("/api/miniapp/profile-note", {
+          method: "POST",
+          body: JSON.stringify({ note }),
+        });
+        profileEditor.style.display = "none";
+        await loadProfile();
+      } catch (e) {
+        showCopyToast("Не удалось сохранить: " + e.message);
+      }
+    });
+  }
+
+  if (profileNoteInput) {
+    profileNoteInput.addEventListener("paste", (event) => {
+      const text = (event.clipboardData && event.clipboardData.getData("text")) || "";
+      const lowered = String(text).toLowerCase();
+      if (
+        lowered.includes("http://") ||
+        lowered.includes("https://") ||
+        lowered.includes("www.") ||
+        lowered.includes("t.me/")
+      ) {
+        event.preventDefault();
+        showCopyToast("Ссылки вставлять нельзя.");
+      }
+    });
+  }
+
+  if (profileHeadLink) {
+    profileHeadLink.style.cursor = "pointer";
+    profileHeadLink.addEventListener("click", () => {
+      openTelegramProfile(currentProfileUsername);
+    });
+  }
 
   copyLink.addEventListener("click", async function () {
     if (showingForeignProfile) {

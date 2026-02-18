@@ -9,11 +9,17 @@
     :root {
       --bg: var(--tg-theme-bg-color, #17212b);
       --card: var(--tg-theme-secondary-bg-color, #232e3c);
-      --line: rgba(255, 255, 255, 0.08);
+      --surface: var(--tg-theme-section-bg-color, var(--tg-theme-secondary-bg-color, #232e3c));
+      --surface-soft: var(--tg-theme-secondary-bg-color, #232e3c);
+      --surface-strong: var(--tg-theme-section-bg-color, #2a3a4d);
+      --line: var(--tg-theme-section-separator-color, rgba(255, 255, 255, 0.08));
       --text: var(--tg-theme-text-color, #e6ebf0);
       --muted: var(--tg-theme-hint-color, #9aa7b5);
       --blue: var(--tg-theme-button-color, #3390ec);
-      --danger: #e64a3b;
+      --accent: var(--tg-theme-link-color, var(--tg-theme-button-color, #3390ec));
+      --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+      --button-fg: var(--tg-theme-button-text-color, #fff);
+      --danger: var(--tg-theme-destructive-text-color, #e64a3b);
       --radius-lg: 22px;
       --radius-md: 14px;
       --space-1: 6px;
@@ -21,8 +27,10 @@
       --space-3: 14px;
       --space-4: 18px;
       --safe: env(safe-area-inset-bottom, 0px);
+      --nav-space: 104px;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
       font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -32,47 +40,69 @@
       text-rendering: optimizeLegibility;
     }
     .wrap {
-      max-width: 760px;
+      max-width: 560px;
       margin: 0 auto;
-      padding: var(--space-4) var(--space-3) calc(104px + var(--safe));
+      min-height: 100dvh;
+      padding: 0 0 calc(var(--space-4) + var(--safe));
     }
     .card {
       background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-lg);
+      border: 0;
+      border-radius: 0;
       padding: var(--space-3);
-      margin-bottom: var(--space-2);
+      margin-bottom: 0;
+      min-height: 100dvh;
       box-shadow: none;
+    }
+    @supports not (height: 100dvh) {
+      .wrap { min-height: 100vh; }
+      .card { min-height: 100vh; }
     }
     .status { color: var(--muted); font-size: 13px; margin-bottom: var(--space-1); min-height: 18px; }
 
     .profile-layout {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: var(--space-2);
-      justify-items: center;
+      gap: 12px;
       margin-bottom: var(--space-1);
     }
-    .profile-left {
+    .profile-head {
       display: grid;
-      justify-items: center;
-      gap: var(--space-1);
-    }
-    .profile-right {
-      display: grid;
-      gap: var(--space-2);
-      justify-items: center;
-      width: 100%;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: center;
       min-width: 0;
     }
+    .profile-meta {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .name-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .name-wrap {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+    .name-top {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     .avatar-wrap {
-      width: 136px;
-      height: 136px;
+      width: 72px;
+      height: 72px;
       border-radius: 999px;
       overflow: hidden;
-      border: 2px solid rgba(255,255,255,.14);
+      border: 1px solid var(--line);
       box-shadow: none;
-      background: #2a3a4d;
+      background: var(--surface-strong);
       position: relative;
     }
     .avatar-wrap img {
@@ -86,56 +116,136 @@
       inset: 0;
       display: grid;
       place-items: center;
-      font-size: 52px;
+      font-size: 28px;
       font-weight: 700;
-      color: #d5e6ff;
+      color: var(--text);
       letter-spacing: -0.03em;
     }
     .name {
-      font-size: 15px;
-      font-weight: 600;
+      font-size: 16px;
+      font-weight: 650;
       letter-spacing: -0.01em;
-      margin-top: 0;
-      text-align: center;
+      margin: 0;
+      text-align: left;
       color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .presence {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1;
+    }
+    .presence-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--accent);
+      display: inline-block;
+    }
+    .presence-edit-btn {
+      width: 24px;
+      height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface-soft);
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      transition: background-color .14s ease, color .14s ease, transform .14s ease;
+    }
+    .presence-edit-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .presence-edit-btn:active { transform: scale(.96); }
+    .presence-edit-btn:hover {
+      color: var(--accent);
+      background: var(--accent-soft, rgba(51, 144, 236, 0.2));
     }
     .chips {
       display: flex;
-      justify-content: center;
+      justify-content: flex-start;
       align-items: center;
-      gap: var(--space-2);
-      margin-top: 2px;
+      gap: 8px;
+      margin-top: 0;
       flex-wrap: wrap;
     }
     .chip {
-      width: 54px;
-      height: 54px;
-      border-radius: 50%;
+      min-width: 34px;
+      height: 34px;
+      padding: 0 8px;
+      border-radius: 999px;
       display: grid;
       place-items: center;
-      background: #31465d;
-      color: #fff;
-      font-size: 24px;
-      border: 2px solid rgba(255,255,255,.18);
+      background: var(--surface-strong);
+      color: var(--text);
+      font-size: 18px;
+      border: 1px solid var(--line);
       box-shadow: none;
-      position: relative;
-      z-index: 1;
-      transition: transform .14s ease;
     }
 
     .bubble {
       width: 100%;
       background: var(--blue);
-      color: #fff;
-      border-radius: 16px;
-      padding: 12px 13px;
-      line-height: 1.4;
-      font-size: 15px;
+      color: var(--button-fg);
+      border-radius: 14px;
+      padding: 12px;
+      line-height: 1.38;
+      font-size: 14px;
       letter-spacing: -0.01em;
       position: relative;
       box-shadow: none;
       white-space: pre-wrap;
     }
+    .bubble-wrap {
+      position: relative;
+      width: 100%;
+    }
+    .bubble-edit-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 24px;
+      height: 24px;
+      border: 1px solid color-mix(in srgb, var(--button-fg) 45%, transparent);
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: color-mix(in srgb, var(--blue) 82%, #000 18%);
+      color: var(--button-fg);
+      cursor: pointer;
+      padding: 0;
+      transition: transform .14s ease, opacity .14s ease;
+    }
+    .bubble-edit-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .bubble-edit-btn:active { transform: scale(.96); }
     .summary-notes {
       margin-top: 6px;
       color: var(--muted);
@@ -143,44 +253,177 @@
       line-height: 1.35;
       white-space: pre-wrap;
     }
+    .answers-block {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-soft);
+      padding: 10px;
+      display: none;
+    }
+    .answers-title {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .answers-list {
+      display: grid;
+      gap: 8px;
+    }
+    .answers-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--surface);
+    }
+    .answers-item-title {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .answers-item-value {
+      font-size: 13px;
+      line-height: 1.32;
+      color: var(--text);
+    }
+    .profile-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+      margin-top: 0;
+      white-space: pre-wrap;
+    }
+    .note-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+    }
 
+    .actions-row { margin-top: var(--space-2); }
     .copy-btn {
-      margin-top: var(--space-2);
+      margin-top: 0;
       width: 100%;
       border: 0;
-      border-radius: 12px;
-      padding: 11px 12px;
+      border-radius: 10px;
+      padding: 10px 12px;
       font-size: 14px;
       font-weight: 600;
-      background: rgba(51,144,236,.2);
-      color: #8bc4ff;
+      background: var(--accent-soft, rgba(51, 144, 236, 0.2));
+      color: var(--accent);
       cursor: pointer;
       transition: background-color .14s ease, transform .14s ease;
     }
     .copy-btn:active { transform: scale(.99); }
+    .ghost-btn {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 600;
+      background: var(--surface-soft);
+      color: var(--text);
+      cursor: pointer;
+      transition: background-color .14s ease, transform .14s ease;
+    }
+    .ghost-btn:active { transform: scale(.99); }
+    .editor {
+      margin-top: 8px;
+      display: none;
+      gap: 8px;
+    }
+    .editor textarea {
+      width: 100%;
+      min-height: 74px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 12px;
+      resize: vertical;
+      font-family: inherit;
+    }
+    .editor-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
 
     .form-note { color: var(--muted); margin-bottom: var(--space-1); font-size: 13px; }
     .answer-target-title {
-      margin: 8px 0 10px;
+      margin: 0;
       font-size: 14px;
       color: var(--text);
       font-weight: 560;
-      min-height: 20px;
+      min-height: 0;
+    }
+    .answer-target-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 10px;
+      min-height: 40px;
+    }
+    .answer-progress {
+      display: none;
+      gap: 0;
+      margin: 6px 0 10px;
+    }
+    .answer-progress-track {
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .answer-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width .2s ease;
+    }
+    .answer-target-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      flex: 0 0 auto;
+      display: none;
+    }
+    .answer-target-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .answer-target-fallback {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      font-size: 24px;
+      color: var(--muted);
     }
     input, select, button.primary {
       width: 100%;
       margin-bottom: var(--space-1);
       border-radius: 12px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,.04);
+      background: var(--surface-soft);
       color: var(--text);
       font-size: 16px;
       padding: 10px 12px;
     }
-    input:focus { outline: none; border-color: rgba(10,132,255,.5); box-shadow: 0 0 0 4px rgba(10,132,255,.12); }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: none; }
     button.primary {
       background: var(--blue);
-      color: #fff;
+      color: var(--button-fg);
       border: none;
       font-weight: 600;
       box-shadow: none;
@@ -203,6 +446,87 @@
       transform: translateY(0);
       pointer-events: auto;
     }
+    .choice-group { display: none !important; }
+    .swipe-card {
+      margin: 10px 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface-soft);
+      min-height: 240px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 14px;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: pan-y;
+      position: relative;
+      transition: transform .18s ease;
+      will-change: transform;
+    }
+    .swipe-card.swipe-left .swipe-choice:first-child { border-color: var(--danger); }
+    .swipe-card.swipe-right .swipe-choice:last-child { border-color: var(--accent); }
+    .swipe-title {
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 560;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .swipe-center {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 10px;
+    }
+    .swipe-choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      font-size: 14px;
+    }
+    .swipe-choice {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 8px;
+      text-align: center;
+      background: var(--surface);
+      line-height: 1.25;
+    }
+    .swipe-choice b {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .swipe-badge {
+      position: absolute;
+      top: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      transform: scale(.92);
+      pointer-events: none;
+      transition: opacity .12s ease, transform .12s ease;
+      border: 1px solid transparent;
+      letter-spacing: .2px;
+    }
+    .swipe-badge.left {
+      left: 12px;
+      color: var(--danger);
+      border-color: var(--danger);
+      background: var(--surface);
+    }
+    .swipe-badge.right {
+      right: 12px;
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--surface);
+    }
     .choice-title {
       font-size: 13px;
       color: var(--muted);
@@ -213,10 +537,11 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: var(--space-1);
+      touch-action: pan-y;
     }
     .choice-btn {
       border: 1px solid var(--line);
-      background: rgba(255,255,255,.04);
+      background: var(--surface-soft);
       color: var(--text);
       border-radius: 11px;
       padding: 8px 9px;
@@ -229,8 +554,8 @@
     }
     .choice-btn .em { display: block; font-size: 20px; margin-bottom: 2px; }
     .choice-btn.active {
-      border-color: rgba(51,144,236,.6);
-      background: rgba(51,144,236,.22);
+      border-color: var(--accent);
+      background: var(--accent-soft, rgba(51, 144, 236, 0.2));
     }
     .choice-btn:active { transform: scale(.99); }
     .status-line { color: var(--muted); min-height: 20px; }
@@ -242,22 +567,45 @@
     }
     .suggestions .item {
       border: 1px solid var(--line);
-      background: rgba(255,255,255,.04);
+      background: var(--surface-soft);
       color: var(--text);
       border-radius: 999px;
-      padding: 6px 10px;
+      padding: 4px 10px 4px 4px;
       font-size: 12px;
       cursor: pointer;
       transition: background-color .14s ease, border-color .14s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .item-avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1;
+    }
+    .item-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }
     .suggestions .item:hover {
-      border-color: rgba(51,144,236,.5);
-      background: rgba(51,144,236,.16);
+      border-color: var(--accent);
+      background: var(--accent-soft, rgba(51, 144, 236, 0.2));
     }
     pre {
       margin: var(--space-2) 0 0;
       white-space: pre-wrap;
-      background: rgba(255,255,255,.03);
+      background: var(--surface-soft);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 10px 11px;
@@ -270,30 +618,59 @@
       left: 50%;
       transform: translateX(-50%);
       bottom: calc(var(--space-4) + var(--safe));
-      width: min(760px, calc(100% - 18px));
-      padding: var(--space-1);
-      border-radius: 16px;
+      width: auto;
+      padding: 4px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(35, 46, 60, .96);
-      box-shadow: none;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, auto);
       gap: var(--space-1);
     }
     .tab-btn {
       border: 0;
-      border-radius: 12px;
-      padding: 10px 8px;
+      border-radius: 10px;
+      width: clamp(44px, 14vw, 52px);
+      height: clamp(44px, 14vw, 52px);
+      justify-self: center;
+      padding: 0;
       background: transparent;
       color: var(--muted);
       font-weight: 580;
-      font-size: 13px;
+      font-size: 0;
       cursor: pointer;
       transition: background-color .14s ease, color .14s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    .tab-ico {
+      display: inline-flex;
+      line-height: 0;
+    }
+    .tab-ico svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform .18s ease;
     }
     .tab-btn.active {
-      background: rgba(51,144,236,.2);
-      color: #8bc4ff;
+      background: var(--accent-soft, rgba(51, 144, 236, 0.2));
+      color: var(--accent);
+    }
+    .tab-btn:active .tab-ico svg { transform: scale(.92); }
+    .tab-btn.active .tab-ico svg { animation: tab-breathe 2.2s ease-in-out infinite; }
+    @keyframes tab-breathe {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-1.5px); }
     }
     .toast {
       position: fixed;
@@ -301,8 +678,8 @@
       bottom: calc(88px + var(--safe));
       transform: translateX(-50%) translateY(10px);
       width: min(740px, calc(100% - 24px));
-      background: rgba(24, 35, 50, .96);
-      color: #dfefff;
+      background: var(--surface);
+      color: var(--text);
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 12px 14px;
@@ -319,13 +696,11 @@
       transform: translateX(-50%) translateY(0);
     }
     @media (max-width: 560px) {
-      .wrap { padding: 12px 10px calc(98px + var(--safe)); }
-      .profile-layout { grid-template-columns: 1fr; gap: var(--space-2); }
-      .profile-left { justify-items: center; }
-      .avatar-wrap { width: 112px; height: 112px; }
-      .name { text-align: center; font-size: 14px; }
-      .chips { gap: 8px; }
-      .chip { width: 48px; height: 48px; font-size: 22px; }
+      .wrap { padding: 0 0 calc(var(--nav-space) + var(--safe)); }
+      .profile-head { grid-template-columns: auto 1fr; }
+      .avatar-wrap { width: 64px; height: 64px; }
+      .name { font-size: 15px; }
+      .chip { height: 32px; min-width: 32px; font-size: 17px; }
       .bubble { font-size: 14px; }
     }
   </style>
@@ -335,76 +710,186 @@
   <section id="profileBlock" class="card">
     <div id="authStatus" class="status">Проверка Telegram сессии...</div>
     <div class="profile-layout">
-      <div class="profile-left">
+      <div class="profile-head">
         <div class="avatar-wrap">
           <img id="avatarImg" alt="avatar">
           <div id="avatarFallback" class="avatar-fallback">U</div>
         </div>
-        <div id="profileName" class="name">@username</div>
-      </div>
-      <div class="profile-right">
-        <div class="chips">
-          <div id="chipTone" class="chip">🙂</div>
-          <div id="chipSpeed" class="chip">🐢</div>
-          <div id="chipFormat" class="chip">💬</div>
+        <div class="profile-meta">
+          <div class="name-row">
+            <div class="name-wrap">
+              <div class="name-top">
+                <div id="profileName" class="name">@username</div>
+                <div id="profilePresence" class="presence" style="display:none;">
+                  <span class="presence-dot"></span>
+                  <span>в приложении</span>
+                </div>
+              </div>
+              <div id="profileNote" class="profile-note" style="display:none;"></div>
+            </div>
+          </div>
+          <div class="chips">
+            <div id="chipTone" class="chip">🙂</div>
+            <div id="chipSpeed" class="chip">🐢</div>
+            <div id="chipFormat" class="chip">💬</div>
+          </div>
         </div>
+      </div>
+      <div class="bubble-wrap">
         <div id="summaryBubble" class="bubble">Загрузка...</div>
-        <div id="summaryNotes" class="summary-notes"></div>
+        <button id="editProfileBtn" class="bubble-edit-btn" title="Редактировать профиль" aria-label="Редактировать профиль">
+          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        </button>
+      </div>
+      <div id="answersBlock" class="answers-block">
+        <div id="answersTitle" class="answers-title">Как тебя обычно воспринимают</div>
+        <div id="answersList" class="answers-list"></div>
+      </div>
+      <div id="summaryNotes" class="summary-notes"></div>
+    </div>
+    <div class="actions-row">
+      <button id="copyLink" class="copy-btn">Поделиться</button>
+    </div>
+    <div id="profileEditor" class="editor">
+      <textarea id="profileNoteInput" maxlength="90" placeholder="Коротко о себе (до 90 символов)"></textarea>
+      <div class="editor-actions">
+        <button id="saveProfileBtn" class="primary">Сохранить</button>
+        <button id="cancelProfileBtn" class="ghost-btn">Отмена</button>
       </div>
     </div>
-    <button id="copyLink" class="copy-btn">Поделиться</button>
     <code id="profileLink" style="display:none;">—</code>
   </section>
 
   <section id="answerBlock" class="card" style="display:none;">
-    <div class="form-note">Оставь ответ о человеке</div>
+    <div id="answerIntro" class="form-note">Оставь ответ о человеке</div>
     <input id="target" list="userSuggestions" placeholder="@username">
     <datalist id="userSuggestions"></datalist>
-    <div class="form-note">Начни вводить username — подтянем из Telegram-базы бота</div>
-    <div id="answerTargetTitle" class="answer-target-title"></div>
+    <div id="answerHint" class="form-note">Начни вводить username — подтянем из Telegram-базы бота</div>
+    <button id="answerBackBtn" class="copy-btn" style="display:none;">← обратно</button>
+    <div id="answerTargetHead" class="answer-target-head" style="display:none;">
+      <div id="answerTargetAvatar" class="answer-target-avatar">
+        <img id="answerTargetAvatarImg" alt="target avatar">
+        <div id="answerTargetAvatarFallback" class="answer-target-fallback">?</div>
+      </div>
+      <div id="answerTargetTitle" class="answer-target-title"></div>
+    </div>
+    <div id="answerProgress" class="answer-progress">
+      <div class="answer-progress-track">
+        <div id="answerProgressBar" class="answer-progress-bar"></div>
+      </div>
+    </div>
+    <div id="swipeCard" class="swipe-card" style="display:none;">
+      <div id="swipeBadgeLeft" class="swipe-badge left">влево</div>
+      <div id="swipeBadgeRight" class="swipe-badge right">вправо</div>
+      <div id="swipeTitle" class="swipe-title"></div>
+      <div class="swipe-center">Свайпни всю карточку влево или вправо</div>
+      <div class="swipe-choices">
+        <div id="swipeLeft" class="swipe-choice"></div>
+        <div id="swipeRight" class="swipe-choice"></div>
+      </div>
+    </div>
     <div class="choice-group" data-step="0">
-      <div class="choice-title">с чего начать разговор лучше</div>
+      <div class="choice-title">1️⃣ Как лучше начать?</div>
       <div class="choice-row">
         <button class="choice-btn" type="button" data-field="tone" data-value="easy">
-          <span class="em">😄</span>легко, с юмора
+          <span class="em">🙂</span>с шутки
         </button>
         <button class="choice-btn" type="button" data-field="tone" data-value="serious">
-          <span class="em">🧠</span>спокойно, по делу
+          <span class="em">🧠</span>по делу
         </button>
       </div>
     </div>
     <div class="choice-group" data-step="1">
-      <div class="choice-title">насколько быстро заходить в контакт</div>
+      <div class="choice-title">2️⃣ Когда писать?</div>
       <div class="choice-row">
         <button class="choice-btn" type="button" data-field="speed" data-value="fast">
-          <span class="em">🔥</span>можно сразу
+          <span class="em">🔥</span>сразу
         </button>
         <button class="choice-btn" type="button" data-field="speed" data-value="slow">
-          <span class="em">🐢</span>лучше постепенно
+          <span class="em">🐢</span>не спеша
         </button>
       </div>
     </div>
     <div class="choice-group" data-step="2">
-      <div class="choice-title">где общение зайдёт лучше</div>
+      <div class="choice-title">3️⃣ Где проще пойдёт?</div>
       <div class="choice-row">
         <button class="choice-btn" type="button" data-field="contact_format" data-value="text">
-          <span class="em">💬</span>переписка
+          <span class="em">💬</span>в переписке
         </button>
         <button class="choice-btn" type="button" data-field="contact_format" data-value="live">
-          <span class="em">🎤</span>живое общение
+          <span class="em">🎤</span>вживую
         </button>
       </div>
     </div>
     <div class="choice-group" data-step="3">
-      <div class="choice-title">есть ли что-то, где лучше аккуратнее</div>
+      <div class="choice-title">4️⃣ Кто делает первый шаг?</div>
       <div class="choice-row">
-        <button class="choice-btn" type="button" data-field="caution" data-value="false">
-          <span class="em">👍</span>нет
+        <button class="choice-btn" type="button" data-field="initiative" data-value="self">
+          <span class="em">👉</span>ему/ей ок, если напишут
         </button>
-        <button class="choice-btn" type="button" data-field="caution" data-value="true">
-          <span class="em">🚩</span>да
+        <button class="choice-btn" type="button" data-field="initiative" data-value="wait">
+          <span class="em">👀</span>лучше, если сначала присмотрятся
         </button>
       </div>
+    </div>
+    <div class="choice-group" data-step="4">
+      <div class="choice-title">5️⃣ С чего заходить?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="start_context" data-value="topic">
+          <span class="em">🌱</span>с лёгкого
+        </button>
+        <button class="choice-btn" type="button" data-field="start_context" data-value="direct">
+          <span class="em">🎯</span>сразу по сути
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="5">
+      <div class="choice-title">6️⃣ Как реагирует в начале?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="attention_reaction" data-value="likes">
+          <span class="em">😊</span>быстро включается
+        </button>
+        <button class="choice-btn" type="button" data-field="attention_reaction" data-value="careful">
+          <span class="em">😶</span>сначала смотрит
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="6">
+      <div class="choice-title">7️⃣ Давление — норм?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="caution" data-value="false">
+          <span class="em">🫶</span>можно активнее
+        </button>
+        <button class="choice-btn" type="button" data-field="caution" data-value="true">
+          <span class="em">⚠️</span>лучше аккуратно
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="7">
+      <div class="choice-title">8️⃣ Как часто писать?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="frequency" data-value="often">
+          <span class="em">📬</span>можно часто
+        </button>
+        <button class="choice-btn" type="button" data-field="frequency" data-value="rare">
+          <span class="em">🕰</span>лучше редко
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="8">
+      <div class="choice-title">9️⃣ Тон общения?</div>
+      <div class="choice-row">
+        <button class="choice-btn" type="button" data-field="comm_format" data-value="informal">
+          <span class="em">😄</span>свободно
+        </button>
+        <button class="choice-btn" type="button" data-field="comm_format" data-value="reserved">
+          <span class="em">🤝</span>сдержанно
+        </button>
+      </div>
+    </div>
+    <div class="choice-group" data-step="9">
+      <div class="choice-title">мы собрали подсказку</div>
+      <div class="form-note">как к нему/ней проще подойти</div>
     </div>
     <button id="sendAnswer" class="primary" style="display:none;">Отправить</button>
     <div id="answerStatus" class="status-line"></div>
@@ -420,9 +905,21 @@
 </div>
 
 <nav class="bottom-nav">
-  <button id="tabProfile" class="tab-btn active">👤 профиль</button>
-  <button id="tabAnswer" class="tab-btn">✍️ ответ</button>
-  <button id="tabInsight" class="tab-btn">👀 узнать</button>
+  <button id="tabProfile" class="tab-btn active" aria-label="Мой профиль" title="Мой профиль">
+    <span class="tab-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/></svg>
+    </span>
+  </button>
+  <button id="tabAnswer" class="tab-btn" aria-label="Ответить" title="Ответить">
+    <span class="tab-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+    </span>
+  </button>
+  <button id="tabInsight" class="tab-btn" aria-label="Узнать о человеке" title="Узнать о человеке">
+    <span class="tab-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+    </span>
+  </button>
 </nav>
 <div id="copyToast" class="toast"></div>
 

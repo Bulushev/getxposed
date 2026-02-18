@@ -67,6 +67,39 @@ def pick_recommendation(dimensions: dict[str, dict[str, int]]) -> tuple[str, str
     return tone_pick, speed_pick, format_pick
 
 
+def pick_majority(dimensions: dict[str, dict[str, int]], field: str, left: str, right: str) -> str:
+    counts = dimensions.get(field, {})
+    return left if counts.get(left, 0) >= counts.get(right, 0) else right
+
+
+def build_answer_cards(dimensions: dict[str, dict[str, int]]) -> list[dict]:
+    spec = [
+        ("style", "Как лучше начать", "tone", "easy", "serious", "🙂 с шутки", "🧠 по делу"),
+        ("tempo", "Темп", "speed", "fast", "slow", "🔥 сразу", "🐢 не спеша"),
+        ("channel", "Канал", "contact_format", "text", "live", "💬 в переписке", "🎤 вживую"),
+        ("initiative", "Первый шаг", "initiative", "self", "wait", "👉 ему/ей ок, если напишут", "👀 лучше, если сначала присмотрятся"),
+        ("start_context", "Контекст старта", "start_context", "topic", "direct", "🌱 с лёгкого", "🎯 сразу по сути"),
+        ("first_reaction", "Реакция в начале", "attention_reaction", "likes", "careful", "😊 быстро включается", "😶 сначала смотрит"),
+        ("pressure", "Давление", "caution", "false", "true", "🫶 можно активнее", "⚠️ лучше аккуратно"),
+        ("frequency", "Частота", "frequency", "often", "rare", "📬 можно часто", "🕰 лучше редко"),
+        ("tone", "Тон общения", "comm_format", "informal", "reserved", "😄 свободно", "🤝 сдержанно"),
+        ("vibe", "Вайб", "emotion_tone", "warm", "neutral", "☀️ легко", "🌙 спокойно"),
+        ("dialog", "Диалог", "feedback_style", "direct", "soft", "💬 любит обсуждать", "👂 больше слушает"),
+        ("certainty", "Неопределённость", "uncertainty", "low", "high", "🧭 нормально", "🚧 лучше конкретно"),
+    ]
+    cards: list[dict] = []
+    for key, title, field, left_key, right_key, left_text, right_text in spec:
+        pick = pick_majority(dimensions, field, left_key, right_key)
+        cards.append(
+            {
+                "id": key,
+                "title": title,
+                "value": left_text if pick == left_key else right_text,
+            }
+        )
+    return cards
+
+
 @health_app.get("/health")
 def health() -> tuple[str, int]:
     return "ok", 200
@@ -128,6 +161,7 @@ def api_miniapp_me():
         "photo_url": init_photo_url,
         }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
+    payload["profile_note"] = db.get_profile_note(user_id)
     return jsonify({"ok": True, "data": payload})
 
 
@@ -148,6 +182,13 @@ def api_miniapp_preview():
                 "link": f"https://t.me/{get_bot_public_username()}?start=ref_preview_user",
                 "invite_link": f"https://t.me/{get_bot_public_username()}",
                 "is_app_user": True,
+                "profile_note": "Люблю спокойное и уважительное общение.",
+                "answer_cards": [
+                    {"id": "style", "title": "Стиль входа", "value": "🙂 с шутки"},
+                    {"id": "tempo", "title": "Темп", "value": "🐢 не спеша"},
+                    {"id": "channel", "title": "Канал", "value": "💬 в переписке"},
+                    {"id": "initiative", "title": "Первый шаг", "value": "👀 лучше, если сначала присмотрятся"},
+                ],
                 "user": {
                     "id": 1,
                     "username": "preview_user",
@@ -208,7 +249,29 @@ def api_miniapp_profile():
     }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
     payload["is_app_user"] = bool(payload["user"].get("app_user") or target_is_app_user)
+    payload["profile_note"] = db.get_profile_note(int(payload["user"].get("id") or 0))
     return jsonify({"ok": True, "data": payload})
+
+
+@health_app.post("/api/miniapp/profile-note")
+def api_miniapp_profile_note():
+    user = get_webapp_user()
+    if not user:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    note = str(body.get("note") or "").strip()
+    if len(note) > 90:
+        return jsonify({"ok": False, "error": "Максимум 90 символов"}), 400
+    lowered = note.lower()
+    if (
+        "http://" in lowered
+        or "https://" in lowered
+        or "www." in lowered
+        or "t.me/" in lowered
+    ):
+        return jsonify({"ok": False, "error": "Ссылки в описании запрещены"}), 400
+    db.set_profile_note(int(user.get("id")), note)
+    return jsonify({"ok": True, "note": note})
 
 
 @health_app.get("/api/miniapp/avatar")
@@ -341,7 +404,15 @@ def api_miniapp_feedback():
     tone = normalize_feedback_value(str(data.get("tone") or ""), {"easy", "serious"}, "serious")
     speed = normalize_feedback_value(str(data.get("speed") or ""), {"fast", "slow"}, "slow")
     contact_format = normalize_feedback_value(str(data.get("contact_format") or ""), {"text", "live"}, "text")
+    initiative = normalize_feedback_value(str(data.get("initiative") or ""), {"self", "wait"}, "wait")
+    start_context = normalize_feedback_value(str(data.get("start_context") or ""), {"topic", "direct"}, "topic")
+    attention_reaction = normalize_feedback_value(str(data.get("attention_reaction") or ""), {"likes", "careful"}, "careful")
     caution = normalize_feedback_value(str(data.get("caution") or ""), {"true", "false"}, "false")
+    frequency = normalize_feedback_value(str(data.get("frequency") or ""), {"often", "rare"}, "rare")
+    comm_format = normalize_feedback_value(str(data.get("comm_format") or ""), {"informal", "reserved"}, "reserved")
+    emotion_tone = normalize_feedback_value(str(data.get("emotion_tone") or ""), {"warm", "neutral"}, "neutral")
+    feedback_style = normalize_feedback_value(str(data.get("feedback_style") or ""), {"direct", "soft"}, "soft")
+    uncertainty = normalize_feedback_value(str(data.get("uncertainty") or ""), {"low", "high"}, "high")
     voter_id = int(user.get("id"))
     username = str(user.get("username") or "").strip().lower()
     if username:
@@ -363,7 +434,15 @@ def api_miniapp_feedback():
             tone,
             speed,
             contact_format,
+            initiative,
+            start_context,
+            attention_reaction,
             caution,
+            frequency,
+            comm_format,
+            emotion_tone,
+            feedback_style,
+            uncertainty,
         ),
         APP_LOOP,
     )
@@ -537,6 +616,7 @@ def build_profile_payload(target: str) -> dict:
         "recommendation": None,
         "caution_block": False,
         "uncertain_block": False,
+        "answer_cards": [],
     }
     if total < 3:
         return result
@@ -562,6 +642,7 @@ def build_profile_payload(target: str) -> dict:
         or is_uncertain(speed_counts["fast"], speed_counts["slow"])
         or is_uncertain(format_counts["text"], format_counts["live"])
     )
+    result["answer_cards"] = build_answer_cards(dimensions)
     return result
 
 
@@ -715,12 +796,37 @@ async def process_feedback_submission(
     tone: str,
     speed: str,
     contact_format: str,
+    initiative: str,
+    start_context: str,
+    attention_reaction: str,
     caution: str,
+    frequency: str,
+    comm_format: str,
+    emotion_tone: str,
+    feedback_style: str,
+    uncertainty: str,
 ) -> tuple[Optional[str], str]:
     before_total = await db_call(db.get_total, target)
     before_dimensions = await db_call(db.get_contact_dimensions, target)
     rec_before = pick_recommendation(before_dimensions)
-    result = await db_call(db.add_vote, target, "feedback", voter_id, tone, speed, contact_format, caution)
+    result = await db_call(
+        db.add_vote,
+        target,
+        "feedback",
+        voter_id,
+        tone,
+        speed,
+        contact_format,
+        caution,
+        initiative,
+        start_context,
+        attention_reaction,
+        frequency,
+        comm_format,
+        emotion_tone,
+        feedback_style,
+        uncertainty,
+    )
     if result is None:
         return None, "База недоступна, попробуй позже"
     if result == "duplicate_recent":
