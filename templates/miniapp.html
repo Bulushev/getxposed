@@ -30,7 +30,10 @@
       --nav-space: 104px;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+    }
     body {
       margin: 0;
       font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -43,7 +46,7 @@
       max-width: 560px;
       margin: 0 auto;
       min-height: 100dvh;
-      padding: 0 0 calc(var(--space-4) + var(--safe));
+      padding: 0 0 calc(var(--nav-space) + var(--safe));
     }
     .card {
       background: var(--card);
@@ -620,7 +623,7 @@
       bottom: calc(var(--space-4) + var(--safe));
       width: auto;
       padding: 4px;
-      border-radius: 14px;
+      border-radius: 22px;
       border: 1px solid var(--line);
       background: color-mix(in srgb, var(--surface) 86%, transparent);
       box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
