@@ -33,6 +33,7 @@
     html, body {
       height: 100%;
       background: var(--bg);
+      overscroll-behavior-y: none;
     }
     body {
       margin: 0;
@@ -47,6 +48,7 @@
       margin: 0 auto;
       min-height: 100dvh;
       padding: 0 0 calc(var(--nav-space) + var(--safe));
+      background: var(--bg);
     }
     .card {
       background: var(--card);
@@ -635,7 +637,7 @@
     }
     .tab-btn {
       border: 0;
-      border-radius: 10px;
+      border-radius: 16px;
       width: clamp(44px, 14vw, 52px);
       height: clamp(44px, 14vw, 52px);
       justify-self: center;

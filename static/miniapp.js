@@ -411,7 +411,7 @@
 
     setAvatar(d.user || {});
     const noteText = String(d.profile_note || "").trim();
-    summaryBubble.textContent = noteText || "Описание пока не добавлено.";
+    summaryBubble.textContent = noteText || "";
     const notes = [];
     if (d.caution_block) notes.push("⚠️ иногда лучше не давить");
     if (d.uncertain_block) notes.push("ℹ️ по некоторым пунктам мнения расходятся");

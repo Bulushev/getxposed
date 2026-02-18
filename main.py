@@ -161,7 +161,16 @@ def api_miniapp_me():
         "photo_url": init_photo_url,
         }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
-    payload["profile_note"] = db.get_profile_note(user_id)
+    note = db.get_profile_note(user_id)
+    if not note and APP_LOOP and APP_BOT:
+        try:
+            note = asyncio.run_coroutine_threadsafe(
+                fetch_user_bio_from_telegram(APP_BOT, user_id),
+                APP_LOOP,
+            ).result(timeout=4)
+        except Exception:
+            note = ""
+    payload["profile_note"] = note
     return jsonify({"ok": True, "data": payload})
 
 
@@ -249,7 +258,17 @@ def api_miniapp_profile():
     }
     payload["user"]["avatar_url"] = build_avatar_proxy_url(payload["user"]["username"])
     payload["is_app_user"] = bool(payload["user"].get("app_user") or target_is_app_user)
-    payload["profile_note"] = db.get_profile_note(int(payload["user"].get("id") or 0))
+    target_user_id = int(payload["user"].get("id") or 0)
+    note = db.get_profile_note(target_user_id)
+    if not note and target_user_id and APP_LOOP and APP_BOT:
+        try:
+            note = asyncio.run_coroutine_threadsafe(
+                fetch_user_bio_from_telegram(APP_BOT, target_user_id),
+                APP_LOOP,
+            ).result(timeout=4)
+        except Exception:
+            note = ""
+    payload["profile_note"] = note
     return jsonify({"ok": True, "data": payload})
 
 
@@ -670,6 +689,17 @@ async def fetch_public_user_from_telegram(bot: Bot, target: str) -> Optional[dic
         "last_name": str(chat.last_name or ""),
         "photo_url": "",
     }
+
+
+async def fetch_user_bio_from_telegram(bot: Bot, user_id: int) -> str:
+    try:
+        chat = await asyncio.wait_for(bot.get_chat(user_id), timeout=3.0)
+    except Exception:
+        return ""
+    bio = str(getattr(chat, "bio", "") or "").strip()
+    if not bio:
+        return ""
+    return bio[:90]
 
 
 async def fetch_avatar_from_telegram(bot: Bot, username: str) -> Optional[tuple[bytes, str]]:
